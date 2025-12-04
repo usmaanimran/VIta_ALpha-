@@ -1,10 +1,14 @@
 import json
 import os
 import locations
+import streamlit as st
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from groq import AsyncGroq 
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY") 
+def get_secret(key):
+    if hasattr(st, "secrets") and key in st.secrets:
+        return st.secrets[key]
+    return os.environ.get(key, "")
 
 class HybridBrain:
     def __init__(self):
@@ -14,7 +18,7 @@ class HybridBrain:
         self.CRITICAL_INFRASTRUCTURE = {
             "PORT": ["colombo port", "harbour", "terminal", "customs", "container"],
             "AIRPORT": ["bia", "katunayake", "mattala", "flights", "airline"],
-            "HIGHWAY": ["southern expressway", "kandy road", "galle road", "a1", "a4", "expressway", "interchange"],
+            "HIGHWAY": ["southern expressway", "kandy road", "galle road", "a1", "a4", "expressway"],
             "POWER": ["norochcholai", "sapugaskanda", "ceb", "grid", "breakdown", "substation"],
             "FINANCE": ["cse", "colombo stock exchange", "cbsl", "central bank", "forex"]
         }
@@ -24,20 +28,21 @@ class HybridBrain:
             "economic": ["imf", "tax", "inflation", "dollar", "debt", "stock market"],
             "social": ["protest", "strike", "riot", "tear gas", "police", "blockade"],
             "environmental": ["flood", "rain", "warning", "landslide", "cyclone", "disaster"],
-            "infrastructure": ["water", "nwsdb", "electricity", "fuel", "litro", "gas", "telecom", "supply", "grid"],
+            "infrastructure": ["water", "nwsdb", "electricity", "fuel", "litro", "gas", "telecom"],
             "power": ["power cut", "blackout", "ceb", "leco", "outage"],
-            # NEW: Opportunity Vector
-            "growth": ["investment", "profit", "launch", "opening", "recovery", "boom", "record high", "grant", "tourism", "yield"] 
+            "growth": ["investment", "profit", "launch", "opening", "recovery", "boom", "grant", "tourism"] 
         }
         
-        if GROQ_API_KEY:
+      
+        self.groq_key = get_secret("GROQ_API_KEY")
+        self.groq_client = None
+        self.neural_active = False
+
+        if self.groq_key:
             try:
-                self.groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+                self.groq_client = AsyncGroq(api_key=self.groq_key)
                 self.neural_active = True
-            except:
-                self.neural_active = False
-        else:
-            self.neural_active = False
+            except: pass
 
     def _symbolic_scan(self, text):
         text_lower = text.lower()
@@ -64,11 +69,10 @@ class HybridBrain:
         if not self.neural_active: 
             return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK"
         try:
-            # UPDATED PROMPT: Explicitly asks for OPPORTUNITY detection
             completion = await self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
-                    {"role": "system", "content": "Analyze for Sri Lankan Business. Determine if this is a RISK or an OPPORTUNITY. Return JSON: {score (0-100), reason, sentiment_type ('RISK' or 'OPPORTUNITY'), logistics_status, location_name}"},
+                    {"role": "system", "content": "Analyze for Sri Lankan Business. Return JSON: {score, reason, sentiment_type ('RISK' or 'OPPORTUNITY'), logistics_status, location_name}"},
                     {"role": "user", "content": f"TEXT: {text}"}
                 ],
                 temperature=0, response_format={"type": "json_object"}
