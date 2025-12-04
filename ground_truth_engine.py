@@ -1,10 +1,20 @@
+
 import requests
 import os
-import time
+import streamlit as st
 
-WEATHERAPI_KEY = os.environ.get("WEATHERAPI_KEY", "")
+def get_secret(key):
+    if hasattr(st, "secrets") and key in st.secrets:
+        return st.secrets[key]
+    return os.environ.get(key, "")
+
+
+WEATHERAPI_KEY = get_secret("WEATHERAPI_KEY")
 
 def fetch_weather_risk(lat=6.927, lon=79.861):
+    if not WEATHERAPI_KEY:
+        return 0.0, "API_KEY_MISSING"
+
     try:
         url = f"http://api.weatherapi.com/v1/current.json?key={WEATHERAPI_KEY}&q={lat},{lon}"
         resp = requests.get(url, timeout=2)
