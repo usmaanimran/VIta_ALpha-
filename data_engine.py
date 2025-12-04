@@ -13,12 +13,9 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-
 def get_secret(key):
-   
     if hasattr(st, "secrets") and key in st.secrets:
         return st.secrets[key]
-    
     return os.environ.get(key, None)
 
 VECTOR_CACHE = [] 
@@ -42,6 +39,7 @@ def init_db():
         print("⚠️ Missing SUPABASE_URL or SUPABASE_KEY secrets")
     
     try:
+       
         if vector_model is None:
             vector_model = SentenceTransformer('all-MiniLM-L6-v2')
     except Exception as e:
@@ -67,7 +65,6 @@ def check_swarm_logic_optimized(new_headline):
     except: return False
 
 async def beam_to_cloud(news_items, weather_status):
-    
     db = init_db()
     if not db: return
     
@@ -75,6 +72,7 @@ async def beam_to_cloud(news_items, weather_status):
     for item in news_items:
         text = item.get('full_text', item['title'])
         
+       
         analysis = await logic_engine.calculate_risk(text)
         
         if analysis.get('priority') == "NOISE": continue
@@ -110,7 +108,7 @@ async def fetch_rss(session, target):
             content = await response.text()
             d = feedparser.parse(content)
             batch = []
-            for entry in d.entries[:5]: # Check top 5
+            for entry in d.entries[:5]: 
                 if entry.link not in SEEN_LINKS:
                     batch.append({
                         "title": entry.title, 
@@ -143,6 +141,7 @@ async def async_listen_loop():
     print("⚡ VIta Alpha Data Engine Started...")
 
     while True:
+        
         rain_mm, weather_status = ground_truth_engine.fetch_weather_risk()
         
         async with aiohttp.ClientSession() as session:
