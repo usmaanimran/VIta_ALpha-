@@ -1,91 +1,173 @@
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
+import plotly.express as px
 import json
 from supabase import create_client
 import logic_engine
-import ground_truth_engine
-import streamlit.components.v1 as components
+import data_engine
+import telegram_engine
 import os
+import time
+import asyncio
+import threading
 from datetime import datetime, timedelta
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://vdyeoagyxjfkytakvzpf.supabase.co")
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"] if "SUPABASE_KEY" in st.secrets else os.environ.get("SUPABASE_KEY", "")
-SOCKET_URL = os.environ.get("SOCKET_URL", "wss://project-vita-backend.onrender.com/ws")
 
-st.set_page_config(page_title="SentinLK | Real-Time", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="VIta Alpha", layout="wide", page_icon="⚡")
+
+
+def get_secret(key):
+    if key in st.secrets:
+        return st.secrets[key]
+    return os.environ.get(key, "")
+
+SUPABASE_URL = get_secret("SUPABASE_URL")
+SUPABASE_KEY = get_secret("SUPABASE_KEY")
+
 
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; }
     h1 { color: #00ff9d !important; text-shadow: 0 0 10px #00ff9d; }
     div[data-testid="stMetricValue"] { color: #00ff9d; }
+    .stProgress > div > div > div > div { background-color: #00ff9d; }
 </style>
 """, unsafe_allow_html=True)
 
-components.html(
-    f"""
-    <script>
-        var ws = new WebSocket("{SOCKET_URL}");
-        ws.onmessage = function(event) {{
-            console.log("NEW DATA");
-            window.parent.location.reload();
-        }};
-    </script>
-    """, 
-    height=0, width=0
-)
 
+@st.cache_resource
+def start_background_brain():
+    def run_async_loop():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        
+        if get_secret("TELEGRAM_SESSION"):
+            loop.create_task(telegram_engine.start_telegram_listener())
+        
+      
+        loop.run_until_complete(data_engine.async_listen_loop())
+        
+  
+    t = threading.Thread(target=run_async_loop, daemon=True)
+    t.start()
+    return t
+
+
+if "brain_started" not in st.session_state:
+    try:
+        start_background_brain()
+        st.session_state.brain_started = True
+    except Exception as e:
+        st.error(f"Failed to start Brain: {e}")
+
+
+if 'last_run' not in st.session_state:
+    st.session_state.last_run = time.time()
+
+if time.time() - st.session_state.last_run > 30:
+    st.session_state.last_run = time.time()
+    st.rerun()
+
+
+supabase = None
 try:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-except: pass
+    if SUPABASE_URL and SUPABASE_KEY:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    st.error(f"Database Connection Failed. Check Secrets. Error: {e}")
+
 
 def parse_vectors(row):
     try:
         data = json.loads(row['vectors'])
-        return pd.Series([data.get('lat', 6.927), data.get('lon', 79.861), data.get('logistics_impact', 'CLEAR'), data.get('sentiment_type', 'RISK')])
+        return pd.Series([
+            data.get('lat', 6.927), 
+            data.get('lon', 79.861), 
+            data.get('logistics_impact', 'CLEAR'), 
+            data.get('sentiment_type', 'RISK') 
+        ])
     except:
         return pd.Series([6.927, 79.861, "CLEAR", "RISK"])
 
 def prioritize_news(df):
     if df.empty: return df
-    
     df['timestamp'] = pd.to_datetime(df['timestamp'])
-    now = datetime.now(df['timestamp'].dt.tz)
-    one_hour_ago = now - timedelta(hours=1)
+    return df.sort_values('timestamp', ascending=False)
+
+
+def render_trend_chart(df):
+    if df.empty: return
     
-    fresh_news = df[df['timestamp'] >= one_hour_ago]
-    old_news = df[df['timestamp'] < one_hour_ago]
     
-    if len(fresh_news) < 10:
-        needed = 10 - len(fresh_news)
-        display_df = pd.concat([fresh_news, old_news.head(needed)])
-    else:
-        display_df = fresh_news
-        
-    return display_df.sort_values('timestamp', ascending=False)
+    df['Trend Value'] = df.apply(lambda x: x['risk_score'] if x['sentiment'] == 'RISK' else x['risk_score'] * -1, axis=1)
+    
+    chart_df = df.sort_values('timestamp')
+    
+   
+    fig = px.area(chart_df, x='timestamp', y='Trend Value', 
+                  title="Real-Time Sentiment Volatility (Negative=Opportunity, Positive=Risk)",
+                  labels={'Trend Value': 'Market Sentiment', 'timestamp': 'Time'},
+                  color_discrete_sequence=['#00ff9d'])
+    
+    
+    fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#00ff9d'),
+        yaxis=dict(gridcolor='#333', zerolinecolor='#666'),
+        xaxis=dict(gridcolor='#333'),
+        margin=dict(l=20, r=20, t=40, b=20),
+        height=300
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
 
 def render_dashboard():
     df = pd.DataFrame()
-    try:
-        res = supabase.table('signals').select("*").order('timestamp', desc=True).limit(60).execute()
-        df = pd.DataFrame(res.data)
-    except: pass
+    
+    
+    if supabase:
+        try:
+            res = supabase.table('signals').select("*").order('timestamp', desc=True).limit(60).execute()
+            df = pd.DataFrame(res.data)
+        except Exception as e:
+            
+            st.warning(f"Connecting to Intelligence Cloud... (If this persists, check your SERVICE_ROLE key)")
+    
     
     if not df.empty:
         df[['lat', 'lon', 'logistics', 'sentiment']] = df.apply(parse_vectors, axis=1)
         display_df = prioritize_news(df.copy())
 
-        st.title("SENTINLK: SITUATIONAL AWARENESS")
+        st.title("VIta Alpha: SITUATIONAL AWARENESS")
+        
         
         c1, c2, c3, c4 = st.columns(4)
         latest = df.iloc[0]
-        c1.metric("LATEST SIGNAL", latest['headline'][:25]+"...", delta="Just Now")
-        c2.metric("THREAT LEVEL", f"{latest['risk_score']}/100", delta_color="inverse")
+        
+        c1.metric("LATEST SIGNAL", latest['headline'][:20]+"...", delta="Just Now")
+        
+        if latest['sentiment'] == "OPPORTUNITY":
+             c2.metric("SIGNAL TYPE", "OPPORTUNITY", delta="Positive Trend", delta_color="normal")
+        else:
+             c2.metric("THREAT LEVEL", f"{latest['risk_score']}/100", delta_color="inverse")
+             
         c3.metric("INFRASTRUCTURE", latest['logistics'], delta_color="off")
         c4.metric("SYSTEM STATUS", "LIVE UPLINK", "Online")
         
-        df['color'] = df['risk_score'].apply(lambda x: [255, 0, 0, 180] if x > 75 else [255, 165, 0, 180] if x > 40 else [0, 255, 100, 180])
+        
+        st.divider()
+        render_trend_chart(df)
+        st.divider()
+
+        
+        df['color'] = df.apply(lambda x: [0, 255, 255, 200] if x['sentiment'] == 'OPPORTUNITY' else 
+                                         ([255, 0, 0, 180] if x['risk_score'] > 75 else 
+                                          [255, 165, 0, 180] if x['risk_score'] > 40 else 
+                                          [0, 255, 100, 180]), axis=1)
         
         layer = pdk.Layer(
             "ScatterplotLayer",
@@ -103,7 +185,8 @@ def render_dashboard():
         tooltip = {
             "html": "<div style='background: #111; color: white; padding: 10px; border-radius: 5px; border: 1px solid #333;'>"
                     "<b>{headline}</b><br/>"
-                    "⚠️ Risk Score: <b>{risk_score}</b><br/>"
+                    "TYPE: <b>{sentiment}</b><br/>"
+                    "⚠️ Score: <b>{risk_score}</b><br/>"
                     "🚛 Logistics: {logistics}<br/>"
                     "📍 Location: {lat}, {lon}</div>",
             "style": {"color": "white"}
@@ -118,25 +201,19 @@ def render_dashboard():
         st.subheader("📡 Live Intelligence Feed")
         
         st.dataframe(
-            display_df[['timestamp', 'headline', 'risk_score', 'logistics', 'link']], 
+            display_df[['timestamp', 'headline', 'sentiment', 'risk_score', 'logistics', 'link']], 
             use_container_width=True,
             hide_index=True,
             column_config={
-                "link": st.column_config.LinkColumn(
-                    "Source",
-                    display_text="Read Source" 
-                ),
-                "timestamp": st.column_config.DatetimeColumn(
-                    "Time",
-                    format="h:mm a"
-                ),
-                "risk_score": st.column_config.ProgressColumn(
-                    "Risk",
-                    format="%d",
-                    min_value=0,
-                    max_value=100,
-                )
+                "link": st.column_config.LinkColumn("Source", display_text="Read Source"),
+                "timestamp": st.column_config.DatetimeColumn("Time", format="h:mm a"),
+                "risk_score": st.column_config.ProgressColumn("Score", format="%d", min_value=0, max_value=100)
             }
         )
+    else:
+        st.info("Initializing Intelligence Feed... This takes about 60 seconds. Please wait.")
+        time.sleep(5)
+        st.rerun()
 
-render_dashboard()
+if __name__ == "__main__":
+    render_dashboard()
