@@ -15,25 +15,39 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 def get_secret(key):
-    if key in st.secrets: return st.secrets[key]
-    return os.environ.get(key, "")
-
-SUPABASE_URL = get_secret("SUPABASE_URL")
-SUPABASE_KEY = get_secret("SUPABASE_KEY")
+   
+    if hasattr(st, "secrets") and key in st.secrets:
+        return st.secrets[key]
+    
+    return os.environ.get(key, None)
 
 VECTOR_CACHE = [] 
 vector_model = None
 supabase: Client = None
 
+def init_db():
+    global supabase, vector_model
+    if supabase is not None: return supabase
 
-try:
-    if SUPABASE_URL and SUPABASE_KEY:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    url = get_secret("SUPABASE_URL")
+    key = get_secret("SUPABASE_KEY")
     
+    if url and key:
+        try:
+            supabase = create_client(url, key)
+            print("✅ Database Connected")
+        except Exception as e:
+            print(f"❌ Database Init Failed: {e}")
+    else:
+        print("⚠️ Missing SUPABASE_URL or SUPABASE_KEY secrets")
     
-    vector_model = SentenceTransformer('all-MiniLM-L6-v2')
-except Exception as e:
-    print(f"Initialization Error: {e}")
+    try:
+        if vector_model is None:
+            vector_model = SentenceTransformer('all-MiniLM-L6-v2')
+    except Exception as e:
+        print(f"⚠️ AI Model Init Failed: {e}")
+    
+    return supabase
 
 SEEN_LINKS = set()
 
@@ -53,18 +67,18 @@ def check_swarm_logic_optimized(new_headline):
     except: return False
 
 async def beam_to_cloud(news_items, weather_status):
-    if not supabase: return
+    
+    db = init_db()
+    if not db: return
     
     payload = []
     for item in news_items:
         text = item.get('full_text', item['title'])
         
-       
         analysis = await logic_engine.calculate_risk(text)
         
         if analysis.get('priority') == "NOISE": continue
 
-       
         if check_swarm_logic_optimized(item['title']):
             analysis['score'] = min(100, analysis['score'] + 15)
             analysis['reason'] += " [Swarm Verified]"
@@ -82,14 +96,13 @@ async def beam_to_cloud(news_items, weather_status):
         }
         payload.append(signal)
 
-  
     try:
         if payload:
-            supabase.table('signals').upsert(payload, on_conflict='link').execute()
+            db.table('signals').upsert(payload, on_conflict='link').execute()
             for p in payload: SEEN_LINKS.add(p['link'])
-            print(f"Uploaded {len(payload)} signals.")
+            print(f"🚀 Uploaded {len(payload)} signals.")
     except Exception as e:
-        print(f"Supabase Write Error: {e}")
+        print(f"❌ Supabase Write Error: {e}")
 
 async def fetch_rss(session, target):
     try:
@@ -109,10 +122,12 @@ async def fetch_rss(session, target):
     except: return []
 
 async def async_listen_loop():
+    db = init_db()
     
-    if supabase and vector_model:
+   
+    if db and vector_model:
         try:
-            res = supabase.table('signals').select("headline").order('timestamp', desc=True).limit(50).execute()
+            res = db.table('signals').select("headline").order('timestamp', desc=True).limit(50).execute()
             if res.data:
                 texts = [r['headline'] for r in res.data]
                 vecs = vector_model.encode(texts)
@@ -138,5 +153,4 @@ async def async_listen_loop():
             if all_news: 
                 await beam_to_cloud(all_news, weather_status)
         
-       
         await asyncio.sleep(60)
