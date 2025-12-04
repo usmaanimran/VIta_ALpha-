@@ -25,7 +25,9 @@ class HybridBrain:
             "social": ["protest", "strike", "riot", "tear gas", "police", "blockade"],
             "environmental": ["flood", "rain", "warning", "landslide", "cyclone", "disaster"],
             "infrastructure": ["water", "nwsdb", "electricity", "fuel", "litro", "gas", "telecom", "supply", "grid"],
-            "power": ["power cut", "blackout", "ceb", "leco", "outage"]
+            "power": ["power cut", "blackout", "ceb", "leco", "outage"],
+            # NEW: Opportunity Vector
+            "growth": ["investment", "profit", "launch", "opening", "recovery", "boom", "record high", "grant", "tourism", "yield"] 
         }
         
         if GROQ_API_KEY:
@@ -62,10 +64,11 @@ class HybridBrain:
         if not self.neural_active: 
             return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK"
         try:
+            # UPDATED PROMPT: Explicitly asks for OPPORTUNITY detection
             completion = await self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
-                    {"role": "system", "content": "Analyze for Sri Lankan Business. Return JSON: {score, reason, sentiment_type, logistics_status, location_name}"},
+                    {"role": "system", "content": "Analyze for Sri Lankan Business. Determine if this is a RISK or an OPPORTUNITY. Return JSON: {score (0-100), reason, sentiment_type ('RISK' or 'OPPORTUNITY'), logistics_status, location_name}"},
                     {"role": "user", "content": f"TEXT: {text}"}
                 ],
                 temperature=0, response_format={"type": "json_object"}
