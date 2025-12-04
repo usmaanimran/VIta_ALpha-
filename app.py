@@ -44,7 +44,7 @@ except Exception as e:
 def parse_vectors(row):
     try:
         data = json.loads(row['vectors'])
-     
+       
         return pd.Series([
             data.get('lat', 6.927), 
             data.get('lon', 79.861), 
@@ -58,7 +58,6 @@ def parse_vectors(row):
 
 st.title("VIta Alpha: SITUATIONAL AWARENESS")
 
-
 @st.fragment(run_every=2)
 def live_dashboard():
     df = pd.DataFrame()
@@ -68,19 +67,19 @@ def live_dashboard():
             res = supabase.table('signals').select("*").order('timestamp', desc=True).limit(60).execute()
             df = pd.DataFrame(res.data)
         except: 
-            pass
+            pass 
     
     if df.empty:
         st.warning("Waiting for uplink... (Check Database Connection)")
         return
 
-
+  
     df[['lat', 'lon', 'logistics', 'sentiment']] = df.apply(parse_vectors, axis=1)
     
   
-    df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_convert('Asia/Colombo')
+    df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_convert('Asia/Colombo').dt.tz_localize(None)
     
- 
+  
     display_df = df.sort_values('timestamp', ascending=False)
     latest = display_df.iloc[0]
 
@@ -88,11 +87,9 @@ def live_dashboard():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("LATEST SIGNAL", latest['headline'][:20]+"...", delta="Just Now")
     
-    
     if latest['sentiment'] == "OPPORTUNITY":
             c2.metric("SIGNAL TYPE", "OPPORTUNITY", delta="Positive", delta_color="normal")
     else:
-            
             c2.metric("THREAT LEVEL", f"{latest['risk_score']}/100", delta_color="inverse")
             
     c3.metric("INFRASTRUCTURE", latest['logistics'], delta_color="off")
@@ -108,14 +105,13 @@ def live_dashboard():
                   title="Real-Time Sentiment Volatility",
                   color_discrete_sequence=['#00ff9d'])
     
-   
     fig.update_layout(
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#00ff9d'),
         yaxis=dict(gridcolor='#333'), 
         xaxis=dict(
             gridcolor='#333', 
-            rangeslider=dict(visible=True),
+            rangeslider=dict(visible=True), 
             type="date"
         ),
         margin=dict(l=20, r=20, t=40, b=20), height=350
@@ -124,7 +120,7 @@ def live_dashboard():
 
     st.divider()
 
-  
+   
     df['color'] = df.apply(lambda x: [0, 255, 255, 200] if x['sentiment'] == 'OPPORTUNITY' else 
                                      ([255, 0, 0, 180] if x['risk_score'] > 75 else 
                                       [255, 165, 0, 180] if x['risk_score'] > 40 else 
@@ -143,9 +139,8 @@ def live_dashboard():
         tooltip={"html": "<b>{headline}</b><br/>Score: {risk_score}", "style": {"color": "white"}}
     ))
 
-  
-    st.subheader("📡 Live Intelligence Feed (Top 10)")
    
+    st.subheader("📡 Live Intelligence Feed (Top 10)")
     top_10_df = display_df.head(10)[['timestamp', 'headline', 'sentiment', 'risk_score', 'logistics', 'link']]
     
     st.dataframe(
