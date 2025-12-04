@@ -12,12 +12,9 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://vdyeoagyxjfkytakvzpf.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_5A-PJGxJj93ocp5G9sSnWw_7jr9ivqc")
-
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 SOCKET_URL = os.environ.get("SOCKET_URL", "http://localhost:8000/broadcast")
-
 
 VECTOR_CACHE = [] 
 vector_model = None
@@ -25,12 +22,9 @@ vector_model = None
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     CLOUD_ACTIVE = True
-    print("🧠 Loading Semantic Vectors...")
     vector_model = SentenceTransformer('all-MiniLM-L6-v2')
-    print("🧠 Semantic Vectors Loaded.")
 except Exception as e:
     CLOUD_ACTIVE = False
-    print(f"❌ Init Failed: {e}")
 
 SEEN_LINKS = set()
 
@@ -47,15 +41,12 @@ def check_swarm_logic_optimized(new_headline):
         return count >= 2 
     except: return False
 
-
 async def beam_to_cloud(news_items, weather_status, push_interface):
     if not CLOUD_ACTIVE: return
     
     payload = []
     for item in news_items:
         text = item.get('full_text', item['title'])
-        
-       
         analysis = await logic_engine.calculate_risk(text)
         
         if analysis.get('priority') == "NOISE": continue
@@ -77,29 +68,21 @@ async def beam_to_cloud(news_items, weather_status, push_interface):
         }
         payload.append(signal)
 
-      
         try:
-          
             if isinstance(push_interface, list):
                 for connection in push_interface:
                     try:
                         await connection.send_json(signal)
                     except: continue
-            
-           
             elif hasattr(push_interface, 'post'):
                  await push_interface.post(SOCKET_URL, json=signal)
-
-        except Exception as e:
-            print(f"⚠️ Push Failed: {e}")
+        except: pass
 
     try:
         if payload:
             supabase.table('signals').upsert(payload, on_conflict='link').execute()
-            print(f"🚀 BEAMED {len(payload)} SIGNALS")
             for p in payload: SEEN_LINKS.add(p['link'])
-    except Exception as e:
-        print(f"❌ DB ERROR: {e}")
+    except: pass
 
 async def fetch_rss(session, target):
     try:
@@ -116,11 +99,7 @@ async def fetch_rss(session, target):
 async def fetch_html(session, target):
     return []
 
-
 async def async_listen_loop(active_connections=None):
-    print(" DATA ENGINE: ASYNC PIPELINE ACTIVE...")
-    
-   
     if CLOUD_ACTIVE:
         try:
             res = supabase.table('signals').select("headline").order('timestamp', desc=True).limit(50).execute()
@@ -143,11 +122,9 @@ async def async_listen_loop(active_connections=None):
             results = await asyncio.gather(*tasks)
             all_news = [item for batch in results for item in batch]
             
-            
             interface = active_connections if active_connections is not None else session
             
             if all_news: 
                 await beam_to_cloud(all_news, weather_status, interface)
         
-        await asyncio.sleep(2) 
-
+        await asyncio.sleep(2)
