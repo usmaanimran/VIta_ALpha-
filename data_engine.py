@@ -14,9 +14,14 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 def get_secret(key):
-    if hasattr(st, "secrets") and key in st.secrets:
-        return st.secrets[key]
-    return os.environ.get(key, None)
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            return st.secrets[key]
+    except:
+        pass
+    return None
 
 VECTOR_CACHE = [] 
 vector_model = None
@@ -39,7 +44,6 @@ def init_db():
         print("⚠️ Missing SUPABASE_URL or SUPABASE_KEY secrets")
     
     try:
-       
         if vector_model is None:
             vector_model = SentenceTransformer('all-MiniLM-L6-v2')
     except Exception as e:
@@ -65,6 +69,7 @@ def check_swarm_logic_optimized(new_headline):
     except: return False
 
 async def beam_to_cloud(news_items, weather_status):
+    
     db = init_db()
     if not db: return
     
@@ -72,7 +77,6 @@ async def beam_to_cloud(news_items, weather_status):
     for item in news_items:
         text = item.get('full_text', item['title'])
         
-       
         analysis = await logic_engine.calculate_risk(text)
         
         if analysis.get('priority') == "NOISE": continue
@@ -122,7 +126,6 @@ async def fetch_rss(session, target):
 async def async_listen_loop():
     db = init_db()
     
-   
     if db and vector_model:
         try:
             res = db.table('signals').select("headline").order('timestamp', desc=True).limit(50).execute()
@@ -141,7 +144,6 @@ async def async_listen_loop():
     print("⚡ VIta Alpha Data Engine Started...")
 
     while True:
-        
         rain_mm, weather_status = ground_truth_engine.fetch_weather_risk()
         
         async with aiohttp.ClientSession() as session:
