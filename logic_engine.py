@@ -33,7 +33,6 @@ class HybridBrain:
             "growth": ["investment", "profit", "launch", "opening", "recovery", "boom", "grant", "tourism"] 
         }
         
-      
         self.groq_key = get_secret("GROQ_API_KEY")
         self.groq_client = None
         self.neural_active = False
@@ -67,26 +66,38 @@ class HybridBrain:
 
     async def _neural_scan(self, text):
         if not self.neural_active: 
-            return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK"
+            
+            return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0
         try:
+         
             completion = await self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
-                    {"role": "system", "content": "Analyze for Sri Lankan Business. Return JSON: {score, reason, sentiment_type ('RISK' or 'OPPORTUNITY'), logistics_status, location_name}"},
+                    {"role": "system", "content": "Analyze for Sri Lankan Business. Return JSON: {score, reason, sentiment_type ('RISK' or 'OPPORTUNITY'), logistics_status, location_name, lat, lon}"},
                     {"role": "user", "content": f"TEXT: {text}"}
                 ],
                 temperature=0, response_format={"type": "json_object"}
             )
             r = json.loads(completion.choices[0].message.content)
-            return r.get('score', 0), r.get('reason', 'AI'), r.get('location_name', 'Colombo'), r.get('logistics_status', "CLEAR"), r.get('sentiment_type', "RISK")
+            
+            return (
+                r.get('score', 0), 
+                r.get('reason', 'AI'), 
+                r.get('location_name', 'Colombo'), 
+                r.get('logistics_status', "CLEAR"), 
+                r.get('sentiment_type', "RISK"),
+                r.get('lat', 0.0), 
+                r.get('lon', 0.0)  
+            )
         except:
-            return 0.0, "Neural Error", "COLOMBO", "CLEAR", "RISK"
+            return 0.0, "Neural Error", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0
 
     async def analyze(self, text):
         math_score = self._symbolic_scan(text)
         if math_score == -1.0: return {"priority": "NOISE"}
 
-        ai_score, ai_reason, loc_name, logistics, sentiment_type = await self._neural_scan(text)
+       
+        ai_score, ai_reason, loc_name, logistics, sentiment_type, ai_lat, ai_lon = await self._neural_scan(text)
 
         final_score = ai_score
         if final_score == 0:
@@ -102,7 +113,13 @@ class HybridBrain:
         final_score = int(max(math_score, final_score))
         final_score = min(100, final_score)
 
-        geo_data = locations.get_coordinates(loc_name)
+       
+        if isinstance(ai_lat, (int, float)) and isinstance(ai_lon, (int, float)) and ai_lat != 0.0 and ai_lon != 0.0:
+            geo_data = {"lat": ai_lat, "lon": ai_lon}
+        else:
+            
+            geo_data = locations.get_coordinates(loc_name)
+
         priority = "CRITICAL" if final_score > 80 else "HIGH" if final_score > 40 else "MEDIUM"
         
         return {
