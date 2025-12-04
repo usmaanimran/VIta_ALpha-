@@ -7,22 +7,23 @@ from telethon.sessions import StringSession
 import data_engine
 import streamlit as st
 
-
 def get_secret(key):
-    if hasattr(st, "secrets") and key in st.secrets:
-        return st.secrets[key]
-    return os.environ.get(key, None)
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            return st.secrets[key]
+    except:
+        pass
+    return None
 
 API_ID = 36361719
 API_HASH = "5e8435321c3c529ea50fa8ed3f9b2526"
-
-
 
 client = None
 
 async def start_telegram_listener():
     global client
-    
     
     session_string = get_secret("TELEGRAM_SESSION")
     
@@ -51,7 +52,6 @@ async def start_telegram_listener():
                     "source": f"Telegram ({source_name})",
                     "published": datetime.now(timezone.utc).isoformat()
                 }
-                
                 
                 await data_engine.beam_to_cloud([signal], "CLEAR")
 
