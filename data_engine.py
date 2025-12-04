@@ -14,18 +14,20 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 def get_secret(key):
-    if key in os.environ:
-        return os.environ[key]
+    if key in os.environ: return os.environ[key]
     try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            return st.secrets[key]
-    except:
-        pass
+        if hasattr(st, "secrets") and key in st.secrets: return st.secrets[key]
+    except: pass
     return None
 
-VECTOR_CACHE = [] 
+
+RECENT_NEWS_VECTORS = [] 
 vector_model = None
 supabase: Client = None
+SEEN_LINKS = set()
+
+
+DEMO_MODE = False 
 
 def init_db():
     global supabase, vector_model
@@ -40,50 +42,77 @@ def init_db():
             print("✅ Database Connected")
         except Exception as e:
             print(f"❌ Database Init Failed: {e}")
-    else:
-        print("⚠️ Missing SUPABASE_URL or SUPABASE_KEY secrets")
-    
+            
     try:
         if vector_model is None:
             vector_model = SentenceTransformer('all-MiniLM-L6-v2')
+            print("🧠 AI Vector Model Loaded")
     except Exception as e:
         print(f"⚠️ AI Model Init Failed: {e}")
     
     return supabase
 
-SEEN_LINKS = set()
-
-def check_swarm_logic_optimized(new_headline):
-    if not vector_model or not VECTOR_CACHE: return False
+def check_swarm_and_dedupe(new_text):
+  
+    global RECENT_NEWS_VECTORS
+    if not vector_model: return False, False
+    
     try:
-        new_vec = vector_model.encode([new_headline])[0]
-        cached_vecs = [v[1] for v in VECTOR_CACHE]
-        if not cached_vecs: return False
+        new_vec = vector_model.encode([new_text])[0]
         
+        if not RECENT_NEWS_VECTORS:
+            RECENT_NEWS_VECTORS.append((new_text, new_vec))
+            return False, False
+            
+        cached_vecs = [v[1] for v in RECENT_NEWS_VECTORS]
         similarities = cosine_similarity([new_vec], cached_vecs)[0]
-        count = np.sum(similarities > 0.65)
         
-        VECTOR_CACHE.append((new_headline, new_vec))
-        if len(VECTOR_CACHE) > 100: VECTOR_CACHE.pop(0)
-        return count >= 2 
-    except: return False
+     
+        if np.any(similarities > 0.85):
+            return True, False 
+
+      
+        swarm_hits = np.sum((similarities > 0.60) & (similarities <= 0.85))
+        is_swarm = swarm_hits >= 1
+
+        
+        RECENT_NEWS_VECTORS.append((new_text, new_vec))
+        if len(RECENT_NEWS_VECTORS) > 100: RECENT_NEWS_VECTORS.pop(0)
+            
+        return False, is_swarm
+        
+    except Exception as e:
+        print(f"Swarm Error: {e}")
+        return False, False
 
 async def beam_to_cloud(news_items, weather_status):
-    
     db = init_db()
     if not db: return
     
     payload = []
+    
     for item in news_items:
         text = item.get('full_text', item['title'])
         
+       
+        is_duplicate, is_swarm = check_swarm_and_dedupe(text)
+        
+        if is_duplicate:
+            print(f"♻️ Skipped Duplicate: {item['title'][:30]}...")
+            continue
+            
+       
         analysis = await logic_engine.calculate_risk(text)
         
-        if analysis.get('priority') == "NOISE": continue
+        if analysis.get('priority') == "TRASH": 
+            print(f"🗑️ Trash Filtered: {item['title'][:20]}...")
+            continue
 
-        if check_swarm_logic_optimized(item['title']):
+      
+        if is_swarm:
             analysis['score'] = min(100, analysis['score'] + 15)
             analysis['reason'] += " [Swarm Verified]"
+            print(f"🐝 Swarm Detected: {item['title'][:30]}")
 
         signal = {
             "timestamp": item['published'],
@@ -102,7 +131,7 @@ async def beam_to_cloud(news_items, weather_status):
         if payload:
             db.table('signals').upsert(payload, on_conflict='link').execute()
             for p in payload: SEEN_LINKS.add(p['link'])
-            print(f"🚀 Uploaded {len(payload)} signals.")
+            print(f"🚀 Uploaded {len(payload)} fresh signals.")
     except Exception as e:
         print(f"❌ Supabase Write Error: {e}")
 
@@ -126,13 +155,16 @@ async def fetch_rss(session, target):
 async def async_listen_loop():
     db = init_db()
     
+    
     if db and vector_model:
         try:
+            print("⏳ Warming up Swarm Memory...")
             res = db.table('signals').select("headline").order('timestamp', desc=True).limit(50).execute()
             if res.data:
                 texts = [r['headline'] for r in res.data]
                 vecs = vector_model.encode(texts)
-                for t, v in zip(texts, vecs): VECTOR_CACHE.append((t, v))
+                for t, v in zip(texts, vecs): RECENT_NEWS_VECTORS.append((t, v))
+            print("✅ Swarm Ready")
         except: pass
 
     targets = [
@@ -154,4 +186,9 @@ async def async_listen_loop():
             if all_news: 
                 await beam_to_cloud(all_news, weather_status)
         
-        await asyncio.sleep(60)
+        if DEMO_MODE:
+            print("🚀 DEMO MODE: Polling fast (10s)...")
+            await asyncio.sleep(10)
+        else:
+            print("💤 STANDBY MODE: Polling normal (1m)...")
+            await asyncio.sleep(60)
