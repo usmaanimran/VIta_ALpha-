@@ -6,9 +6,14 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from groq import AsyncGroq 
 
 def get_secret(key):
-    if hasattr(st, "secrets") and key in st.secrets:
-        return st.secrets[key]
-    return os.environ.get(key, "")
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            return st.secrets[key]
+    except:
+        pass
+    return None
 
 class HybridBrain:
     def __init__(self):
@@ -66,10 +71,8 @@ class HybridBrain:
 
     async def _neural_scan(self, text):
         if not self.neural_active: 
-            
             return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0
         try:
-         
             completion = await self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
@@ -86,8 +89,8 @@ class HybridBrain:
                 r.get('location_name', 'Colombo'), 
                 r.get('logistics_status', "CLEAR"), 
                 r.get('sentiment_type', "RISK"),
-                r.get('lat', 0.0), 
-                r.get('lon', 0.0)  
+                r.get('lat', 0.0),
+                r.get('lon', 0.0)
             )
         except:
             return 0.0, "Neural Error", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0
@@ -96,7 +99,6 @@ class HybridBrain:
         math_score = self._symbolic_scan(text)
         if math_score == -1.0: return {"priority": "NOISE"}
 
-       
         ai_score, ai_reason, loc_name, logistics, sentiment_type, ai_lat, ai_lon = await self._neural_scan(text)
 
         final_score = ai_score
@@ -113,11 +115,9 @@ class HybridBrain:
         final_score = int(max(math_score, final_score))
         final_score = min(100, final_score)
 
-       
         if isinstance(ai_lat, (int, float)) and isinstance(ai_lon, (int, float)) and ai_lat != 0.0 and ai_lon != 0.0:
             geo_data = {"lat": ai_lat, "lon": ai_lon}
         else:
-            
             geo_data = locations.get_coordinates(loc_name)
 
         priority = "CRITICAL" if final_score > 80 else "HIGH" if final_score > 40 else "MEDIUM"
