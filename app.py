@@ -9,13 +9,11 @@ import streamlit.components.v1 as components
 import os
 from datetime import datetime, timedelta
 
-
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://vdyeoagyxjfkytakvzpf.supabase.co")
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"] if "SUPABASE_KEY" in st.secrets else os.environ.get("SUPABASE_KEY", "sb_publishable_5A-PJGxJj93ocp5G9sSnWw_7jr9ivqc")
-SOCKET_URL = os.environ.get("SOCKET_URL", "wss://project-vita-backend.onrender.com/ws") 
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"] if "SUPABASE_KEY" in st.secrets else os.environ.get("SUPABASE_KEY", "")
+SOCKET_URL = os.environ.get("SOCKET_URL", "wss://project-vita-backend.onrender.com/ws")
 
 st.set_page_config(page_title="SentinLK | Real-Time", layout="wide", page_icon="⚡")
-
 
 st.markdown("""
 <style>
@@ -25,13 +23,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 components.html(
     f"""
     <script>
         var ws = new WebSocket("{SOCKET_URL}");
         ws.onmessage = function(event) {{
-            console.log("⚡ NEW DATA");
+            console.log("NEW DATA");
             window.parent.location.reload();
         }};
     </script>
@@ -51,49 +48,36 @@ def parse_vectors(row):
         return pd.Series([6.927, 79.861, "CLEAR", "RISK"])
 
 def prioritize_news(df):
-   
     if df.empty: return df
     
-    
     df['timestamp'] = pd.to_datetime(df['timestamp'])
-    
-   
     now = datetime.now(df['timestamp'].dt.tz)
     one_hour_ago = now - timedelta(hours=1)
     
-   
     fresh_news = df[df['timestamp'] >= one_hour_ago]
     old_news = df[df['timestamp'] < one_hour_ago]
     
-  
     if len(fresh_news) < 10:
         needed = 10 - len(fresh_news)
         display_df = pd.concat([fresh_news, old_news.head(needed)])
     else:
-     
         display_df = fresh_news
         
-  
     return display_df.sort_values('timestamp', ascending=False)
 
 def render_dashboard():
     df = pd.DataFrame()
     try:
- 
         res = supabase.table('signals').select("*").order('timestamp', desc=True).limit(60).execute()
         df = pd.DataFrame(res.data)
     except: pass
     
     if not df.empty:
-   
         df[['lat', 'lon', 'logistics', 'sentiment']] = df.apply(parse_vectors, axis=1)
-        
-   
         display_df = prioritize_news(df.copy())
 
-        st.title("VIta_ALpha: SITUATIONAL AWARENESS")
+        st.title("SENTINLK: SITUATIONAL AWARENESS")
         
-       
         c1, c2, c3, c4 = st.columns(4)
         latest = df.iloc[0]
         c1.metric("LATEST SIGNAL", latest['headline'][:25]+"...", delta="Just Now")
@@ -101,7 +85,6 @@ def render_dashboard():
         c3.metric("INFRASTRUCTURE", latest['logistics'], delta_color="off")
         c4.metric("SYSTEM STATUS", "LIVE UPLINK", "Online")
         
-       
         df['color'] = df['risk_score'].apply(lambda x: [255, 0, 0, 180] if x > 75 else [255, 165, 0, 180] if x > 40 else [0, 255, 100, 180])
         
         layer = pdk.Layer(
@@ -132,7 +115,6 @@ def render_dashboard():
             tooltip=tooltip
         ))
         
-      
         st.subheader("📡 Live Intelligence Feed")
         
         st.dataframe(
