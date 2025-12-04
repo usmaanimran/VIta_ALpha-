@@ -155,7 +155,9 @@ LANDMARK_ALIASES = {
     "BIA": "KATUNAYAKE",
     "AIRPORT": "KATUNAYAKE",
     "SOUTHERN EXPRESSWAY": "KOTTAWA", 
-    "KDU": "RATMALANA"
+    "KDU": "RATMALANA",
+    "ARUGAMBE": "ARUGAM BAY",
+    "ARUGAMBAY": "ARUGAM BAY"
 }
 
 def get_coordinates(name):
@@ -163,13 +165,21 @@ def get_coordinates(name):
     
     clean_name = name.upper().strip()
     
+    
     if clean_name in LANDMARK_ALIASES:
         target_city = LANDMARK_ALIASES[clean_name]
         return SRI_LANKA_GRID[target_city]
 
+    
+    for alias, target in LANDMARK_ALIASES.items():
+        if alias in clean_name:
+            return SRI_LANKA_GRID[target]
+
+    
     if clean_name in SRI_LANKA_GRID:
         return SRI_LANKA_GRID[clean_name]
     
+  
     for key in SRI_LANKA_GRID:
         if key in clean_name:
             return SRI_LANKA_GRID[key]
@@ -179,8 +189,3 @@ def get_coordinates(name):
             return SRI_LANKA_GRID[key]
             
     return SRI_LANKA_GRID["COLOMBO"]
-
-if __name__ == "__main__":
-    print(f"Parliament -> {get_coordinates('Parliament')}")
-    print(f"Galle Face -> {get_coordinates('Galle Face Green')}")
-    print(f"Unknown -> {get_coordinates('Atlantis')}")
