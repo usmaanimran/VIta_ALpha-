@@ -6,6 +6,7 @@ from typing import List
 import os
 import data_engine
 import ground_truth_engine
+import telegram_engine
 
 app = FastAPI()
 
@@ -25,8 +26,8 @@ def home():
 
 @app.on_event("startup")
 async def startup_event():
-    print("SYSTEM STARTUP")
     asyncio.create_task(data_engine.async_listen_loop(active_connections))
+    asyncio.create_task(telegram_engine.start_telegram_listener())
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
