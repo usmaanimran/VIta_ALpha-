@@ -4,13 +4,8 @@ import pydeck as pdk
 import plotly.express as px
 import json
 from supabase import create_client
-import logic_engine
-import data_engine
-import telegram_engine
 import os
 import time
-import asyncio
-import threading
 from datetime import datetime, timedelta
 
 
@@ -36,25 +31,6 @@ def get_secret(key):
         pass
     return None
 
-@st.cache_resource
-def start_background_brain():
-    def run_async_loop():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        if get_secret("TELEGRAM_SESSION"):
-            loop.create_task(telegram_engine.start_telegram_listener())
-        loop.run_until_complete(data_engine.async_listen_loop())
-        
-    t = threading.Thread(target=run_async_loop, daemon=True)
-    t.start()
-    return t
-
-if "brain_started" not in st.session_state:
-    try:
-        start_background_brain()
-        st.session_state.brain_started = True
-    except Exception as e:
-        st.error(f"Failed to start Brain: {e}")
 
 supabase = None
 try:
@@ -68,6 +44,7 @@ except Exception as e:
 def parse_vectors(row):
     try:
         data = json.loads(row['vectors'])
+     
         return pd.Series([
             data.get('lat', 6.927), 
             data.get('lon', 79.861), 
@@ -75,6 +52,7 @@ def parse_vectors(row):
             data.get('sentiment_type', 'RISK') 
         ])
     except:
+       
         return pd.Series([6.927, 79.861, "CLEAR", "RISK"])
 
 
@@ -86,27 +64,35 @@ def live_dashboard():
     df = pd.DataFrame()
     if supabase:
         try:
+           
             res = supabase.table('signals').select("*").order('timestamp', desc=True).limit(60).execute()
             df = pd.DataFrame(res.data)
-        except: pass
+        except: 
+            pass
     
     if df.empty:
-        st.warning("Waiting for uplink...")
+        st.warning("Waiting for uplink... (Check Database Connection)")
         return
 
- 
+
     df[['lat', 'lon', 'logistics', 'sentiment']] = df.apply(parse_vectors, axis=1)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+  
+    df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_convert('Asia/Colombo')
+    
+ 
     display_df = df.sort_values('timestamp', ascending=False)
     latest = display_df.iloc[0]
 
-    
+  
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("LATEST SIGNAL", latest['headline'][:20]+"...", delta="Just Now")
+    
     
     if latest['sentiment'] == "OPPORTUNITY":
             c2.metric("SIGNAL TYPE", "OPPORTUNITY", delta="Positive", delta_color="normal")
     else:
+            
             c2.metric("THREAT LEVEL", f"{latest['risk_score']}/100", delta_color="inverse")
             
     c3.metric("INFRASTRUCTURE", latest['logistics'], delta_color="off")
@@ -114,7 +100,7 @@ def live_dashboard():
 
     st.divider()
 
-  
+    
     df['Trend Value'] = df.apply(lambda x: x['risk_score'] if x['sentiment'] == 'RISK' else x['risk_score'] * -1, axis=1)
     chart_df = df.sort_values('timestamp')
     
@@ -122,18 +108,23 @@ def live_dashboard():
                   title="Real-Time Sentiment Volatility",
                   color_discrete_sequence=['#00ff9d'])
     
+   
     fig.update_layout(
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#00ff9d'),
         yaxis=dict(gridcolor='#333'), 
-        xaxis=dict(gridcolor='#333', rangeslider=dict(visible=True), type="date"),
+        xaxis=dict(
+            gridcolor='#333', 
+            rangeslider=dict(visible=True),
+            type="date"
+        ),
         margin=dict(l=20, r=20, t=40, b=20), height=350
     )
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
-   
+  
     df['color'] = df.apply(lambda x: [0, 255, 255, 200] if x['sentiment'] == 'OPPORTUNITY' else 
                                      ([255, 0, 0, 180] if x['risk_score'] > 75 else 
                                       [255, 165, 0, 180] if x['risk_score'] > 40 else 
@@ -154,6 +145,7 @@ def live_dashboard():
 
   
     st.subheader("📡 Live Intelligence Feed (Top 10)")
+   
     top_10_df = display_df.head(10)[['timestamp', 'headline', 'sentiment', 'risk_score', 'logistics', 'link']]
     
     st.dataframe(
