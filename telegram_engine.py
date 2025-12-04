@@ -1,44 +1,60 @@
 import asyncio
-import aiohttp
-from telethon import TelegramClient, events
-from datetime import datetime, timezone
 import os
-import data_engine 
+import aiohttp 
+from datetime import datetime, timezone 
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+import data_engine
+
 
 API_ID = 36361719
 API_HASH = "5e8435321c3c529ea50fa8ed3f9b2526"
+SESSION_STRING = os.environ.get("TELEGRAM_SESSION")
 
-async def main():
-    client = TelegramClient('sentinlk_session', API_ID, API_HASH)
-    await client.start()
 
-    @client.on(events.NewMessage())
-    async def handler(event):
-        try:
-            text = event.message.message
-            if not text: return
-            if text.startswith('/'): return
+client = None
 
-            chat = await event.get_chat()
-            
-            source_name = "Unknown"
-            if hasattr(chat, 'title'): source_name = chat.title
-            elif hasattr(chat, 'username'): source_name = chat.username
+async def start_telegram_listener():
+    global client
+    if not SESSION_STRING:
+        print("⚠️ NO TELEGRAM SESSION FOUND. SKIPPING.")
+        return
 
-            signal = {
-                "title": text[:100] + "...",
-                "full_text": text,
-                "link": f"https://t.me/{source_name}/{event.id}",
-                "source": f"Telegram ({source_name})",
-                "published": datetime.now(timezone.utc).isoformat()
-            }
+    print("⚡ TELEGRAM CLOUD UPLINK: STARTING...")
+    
+    try:
+      
+        client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+        await client.start()
+        print("✅ TELEGRAM CLOUD UPLINK: CONNECTED 24/7.")
 
-            async with aiohttp.ClientSession() as session:
-                await data_engine.beam_to_cloud([signal], "CLEAR", session)
+        @client.on(events.NewMessage())
+        async def handler(event):
+            try:
+                text = event.message.message
+                if not text or text.startswith('/'): return
 
-        except: pass
+                chat = await event.get_chat()
+                source_name = getattr(chat, 'title', getattr(chat, 'username', 'Unknown'))
 
-    await client.run_until_disconnected()
+                signal = {
+                    "title": text[:100] + "...",
+                    "full_text": text,
+                    "link": f"https://t.me/{source_name}/{event.id}",
+                    "source": f"Telegram ({source_name})",
+                    "published": datetime.now(timezone.utc).isoformat()
+                }
+                
+                print(f"📨 CLOUD TELEGRAM RECEIVED: {signal['title']}")
+                
+               
+                async with aiohttp.ClientSession() as session:
+                    await data_engine.beam_to_cloud([signal], "CLEAR", session)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+            except Exception as e:
+                print(f"⚠️ TELEGRAM ERROR: {e}")
+
+ 
+        
+    except Exception as e:
+        print(f"❌ TELEGRAM LOGIN FAILED: {e}")
