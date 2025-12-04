@@ -5,19 +5,28 @@ from datetime import datetime, timezone
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 import data_engine
+import streamlit as st
+
+
+def get_secret(key):
+    if hasattr(st, "secrets") and key in st.secrets:
+        return st.secrets[key]
+    return os.environ.get(key, None)
 
 API_ID = 36361719
 API_HASH = "5e8435321c3c529ea50fa8ed3f9b2526"
-SESSION_STRING = os.environ.get("TELEGRAM_SESSION")
+SESSION_STRING = get_secret("TELEGRAM_SESSION")
 
 client = None
 
 async def start_telegram_listener():
     global client
     if not SESSION_STRING:
+        print("⚠️ No TELEGRAM_SESSION secret found. Skipping Telegram listener.")
         return
 
     try:
+        print("🔵 Starting Telegram Client...")
         client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
         await client.start()
 
@@ -38,11 +47,14 @@ async def start_telegram_listener():
                     "published": datetime.now(timezone.utc).isoformat()
                 }
                 
-                async with aiohttp.ClientSession() as session:
-                    await data_engine.beam_to_cloud([signal], "CLEAR", session)
+                
+                await data_engine.beam_to_cloud([signal], "CLEAR")
 
-            except:
-                pass
+            except Exception as e:
+                print(f"Telegram Error: {e}")
         
-    except:
-        pass
+        print("✅ Telegram Listener Active")
+        await client.run_until_disconnected()
+        
+    except Exception as e:
+        print(f"❌ Telegram Startup Failed: {e}")
