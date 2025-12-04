@@ -15,7 +15,6 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="VIta Alpha", layout="wide", page_icon="❎")
 
-
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; }
@@ -25,12 +24,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 def get_secret(key):
-    if hasattr(st, "secrets") and key in st.secrets:
-        return st.secrets[key]
-    return os.environ.get(key, "")
-
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            return st.secrets[key]
+    except:
+        pass
+    return None
 
 @st.cache_resource
 def start_background_brain():
@@ -38,17 +40,14 @@ def start_background_brain():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        
         if get_secret("TELEGRAM_SESSION"):
             loop.create_task(telegram_engine.start_telegram_listener())
-        
         
         loop.run_until_complete(data_engine.async_listen_loop())
         
     t = threading.Thread(target=run_async_loop, daemon=True)
     t.start()
     return t
-
 
 if "brain_started" not in st.session_state:
     try:
@@ -57,14 +56,12 @@ if "brain_started" not in st.session_state:
     except Exception as e:
         st.error(f"Failed to start Brain: {e}")
 
-
 if 'last_run' not in st.session_state:
     st.session_state.last_run = time.time()
 
 if time.time() - st.session_state.last_run > 30:
     st.session_state.last_run = time.time()
     st.rerun()
-
 
 supabase = None
 try:
@@ -74,7 +71,6 @@ try:
         supabase = create_client(url, key)
 except Exception as e:
     st.error(f"Database Connection Failed: {e}")
-
 
 def parse_vectors(row):
     try:
@@ -108,7 +104,6 @@ def render_trend_chart(df):
         margin=dict(l=20, r=20, t=40, b=20), height=300
     )
     st.plotly_chart(fig, use_container_width=True)
-
 
 def render_dashboard():
     df = pd.DataFrame()
