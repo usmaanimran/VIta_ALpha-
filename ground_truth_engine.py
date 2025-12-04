@@ -1,13 +1,16 @@
-
 import requests
 import os
 import streamlit as st
 
 def get_secret(key):
-    if hasattr(st, "secrets") and key in st.secrets:
-        return st.secrets[key]
-    return os.environ.get(key, "")
-
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            return st.secrets[key]
+    except:
+        pass
+    return None
 
 WEATHERAPI_KEY = get_secret("WEATHERAPI_KEY")
 
