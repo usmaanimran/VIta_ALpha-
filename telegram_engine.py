@@ -15,19 +15,24 @@ def get_secret(key):
 
 API_ID = 36361719
 API_HASH = "5e8435321c3c529ea50fa8ed3f9b2526"
-SESSION_STRING = get_secret("TELEGRAM_SESSION")
+
+
 
 client = None
 
 async def start_telegram_listener():
     global client
-    if not SESSION_STRING:
+    
+    
+    session_string = get_secret("TELEGRAM_SESSION")
+    
+    if not session_string:
         print("⚠️ No TELEGRAM_SESSION secret found. Skipping Telegram listener.")
         return
 
     try:
         print("🔵 Starting Telegram Client...")
-        client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+        client = TelegramClient(StringSession(session_string), API_ID, API_HASH)
         await client.start()
 
         @client.on(events.NewMessage())
