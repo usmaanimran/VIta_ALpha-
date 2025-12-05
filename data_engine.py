@@ -1,6 +1,8 @@
 import asyncio
 import aiohttp
 import feedparser
+from bs4 import BeautifulSoup 
+import re
 from supabase import create_client, Client
 from datetime import datetime, timezone
 import logic_engine
@@ -83,11 +85,15 @@ async def beam_to_cloud(news_items, weather_status):
         text = item.get('full_text', item['title'])
         is_telegram = "Telegram" in item.get('source', '')
         
+       
+        if item['link'] in SEEN_LINKS:
+            continue
+            
         is_duplicate, is_swarm, new_vec = check_swarm_and_dedupe(text)
         
         if is_duplicate and not is_telegram:
             SEEN_LINKS.add(item['link'])
-            print(f"♻️ Skipped Duplicate")
+            print(f"♻️ Skipped Duplicate: {item['title'][:30]}...")
             continue
             
         analysis = await logic_engine.calculate_risk(text)
@@ -100,7 +106,7 @@ async def beam_to_cloud(news_items, weather_status):
                 print(f"🛡️ Telegram Override")
             else:
                 SEEN_LINKS.add(item['link'])
-                print(f"🗑️ Trash Filtered")
+                print(f"🗑️ Trash Filtered: {item['title'][:30]}...")
                 continue
 
         if is_swarm:
@@ -133,27 +139,130 @@ async def beam_to_cloud(news_items, weather_status):
                 RECENT_NEWS_VECTORS.append((txt, vec))
                 if len(RECENT_NEWS_VECTORS) > 100: RECENT_NEWS_VECTORS.pop(0)
                 
-            print(f"🚀 Uploaded {len(payload)} fresh signals.")
+            print(f"🚀 Uploaded {len(payload)} fresh signals from {payload[0]['source']}")
             
     except Exception as e:
         print(f"❌ Supabase Write Error: {e}")
 
-async def fetch_rss(session, target):
+
+async def fetch_html(session, target):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    
     try:
-        async with session.get(target['url']) as response:
-            content = await response.text()
-            d = feedparser.parse(content)
+        async with session.get(target['url'], headers=headers, timeout=10) as response:
+            if response.status != 200: 
+                print(f"⚠️ Blocked/Error from {target['name']}: {response.status}")
+                return []
+            
+            html_content = await response.text()
+            soup = BeautifulSoup(html_content, 'html.parser')
             batch = []
-            for entry in d.entries[:5]: 
-                if entry.link not in SEEN_LINKS:
-                    batch.append({
-                        "title": entry.title, 
-                        "link": entry.link, 
-                        "source": target['name'], 
-                        "published": datetime.now(timezone.utc).isoformat()
-                    })
+            
+          
+            def add_item(link_tag, section_name):
+                if link_tag and link_tag.get_text(strip=True):
+                    title = link_tag.get_text(strip=True)
+                    href = link_tag['href']
+                    
+                   
+                    if href.startswith('/'): 
+                       
+                        base_url_parts = target['url'].split('/')
+                        base_url = f"{base_url_parts[0]}//{base_url_parts[2]}"
+                        href = base_url + href
+                    
+                    
+                    if not any(x['link'] == href for x in batch):
+                        full_title = f"[{section_name}] {title}"
+                        batch.append({
+                            "title": full_title,
+                            "link": href,
+                            "source": target['name'],
+                            "published": datetime.now(timezone.utc).isoformat()
+                        })
+
+      
+            if "adaderana" in target['url']:
+             
+                lead = soup.find('div', class_='news-custom-heading') or soup.find('div', class_='lead-story')
+                if lead: add_item(lead.find('a'), "LEAD")
+                
+             
+                if not lead:
+                    top_story = soup.find('div', class_='story-text')
+                    if top_story: add_item(top_story.find('a'), "LEAD")
+
+               
+                hot_news = soup.find_all('div', class_='story-text', limit=6)
+                for item in hot_news[1:]:
+                    add_item(item.find('a'), "HOT NEWS")
+
+         
+            elif "dailymirror" in target['url']:
+                
+                top_header = soup.find(string=re.compile("Top Story", re.IGNORECASE))
+                if top_header:
+                    container = top_header.find_parent('div') or top_header.find_parent('section')
+                    if container: add_item(container.find('a'), "TOP STORY")
+                
+             
+                breaking_header = soup.find(string=re.compile("Breaking News", re.IGNORECASE))
+                if breaking_header:
+                    sidebar = breaking_header.find_parent('div') or breaking_header.find_parent('aside')
+                    if sidebar:
+                        for link in sidebar.find_all('a', limit=5):
+                            add_item(link, "BREAKING")
+                
+               
+                if not batch:
+                     for item in soup.select('.col-md-8 h3 a', limit=5):
+                        add_item(item, "LATEST")
+
+           
+            elif "newsfirst" in target['url']:
+               
+                main_block = soup.find('div', class_='main-news-block')
+                if main_block:
+                    for link in main_block.find_all('a', limit=3):
+                        add_item(link, "TOP STORY")
+                
+          
+                latest_block = soup.find('div', class_='latest-news-block') or soup.find('div', class_='sub-1')
+                if latest_block:
+                    for link in latest_block.find_all('a', limit=5):
+                        add_item(link, "LATEST")
+
+        
+            elif "island" in target['url']:
+                
+                for item in soup.select('ul.mvp-blog-story-list li a', limit=5):
+                    if len(item.get_text(strip=True)) > 10:
+                        add_item(item, "LATEST")
+
+         
+            elif "newswire" in target['url']:
+                
+                lead_section = soup.select_one('.td_block_wrap.td_block_big_grid_fl')
+                if lead_section:
+                    add_item(lead_section.find('a'), "LEAD")
+
+            
+                latest_section = soup.select('.td_block_inner .entry-title a')
+                for link in latest_section[:5]:
+                    add_item(link, "LATEST")
+
+            
+            elif "colombotimes" in target['url']:
+                for item in soup.select('h3.entry-title a, h2.entry-title a', limit=5):
+                    add_item(item, "LATEST")
+
             return batch
-    except: return []
+            
+    except Exception as e:
+        print(f"⚠️ HTML Parse Error [{target['name']}]: {e}")
+        return []
 
 async def async_listen_loop():
     db = init_db()
@@ -169,26 +278,35 @@ async def async_listen_loop():
             print("✅ Swarm Ready")
         except: pass
 
+    
     targets = [
-        {"name": "Ada Derana", "url": "http://www.adaderana.lk/rss.php", "type": "rss"},
-        {"name": "Daily Mirror", "url": "https://www.dailymirror.lk/rss", "type": "rss"},
-        {"name": "Lanka C News", "url": "https://lankacnews.com/feed/", "type": "rss"}
+        {"name": "Ada Derana", "url": "http://www.adaderana.lk/hot-news/", "type": "html"},
+        {"name": "Daily Mirror", "url": "https://www.dailymirror.lk/latest-news", "type": "html"},
+        {"name": "News First", "url": "https://english.newsfirst.lk/", "type": "html"},
+        {"name": "The Island", "url": "https://island.lk/", "type": "html"},
+        {"name": "Newswire", "url": "https://www.newswire.lk/", "type": "html"},
+        {"name": "Colombo Times", "url": "https://colombotimes.lk/", "type": "html"}
     ]
 
-    print("⚡ VIta Alpha Data Engine Started...")
+    print("⚡ VIta Alpha Data Engine Started HTML MODE...")
 
     while True:
         rain_mm, weather_status = ground_truth_engine.fetch_weather_risk()
         
         async with aiohttp.ClientSession() as session:
-            tasks = [fetch_rss(session, t) for t in targets]
+            tasks = []
+            for t in targets:
+               
+                tasks.append(fetch_html(session, t))
+            
             results = await asyncio.gather(*tasks)
             all_news = [item for batch in results for item in batch]
             
             if all_news: 
                 await beam_to_cloud(all_news, weather_status)
         
+       
         if DEMO_MODE:
             await asyncio.sleep(10)
         else:
-            await asyncio.sleep(120)
+            await asyncio.sleep(30)
