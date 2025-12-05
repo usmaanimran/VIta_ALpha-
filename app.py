@@ -87,14 +87,14 @@ def parse_vectors(row):
     except:
         return pd.Series([6.927, 79.861, "CLEAR", "RISK"])
 
-st.title("VIta Alpha: SITUATIONAL AWARENESS")
+st.title("VIta Alpha ❎")
 
 @st.fragment(run_every=2)
 def live_dashboard():
     df = pd.DataFrame()
     if supabase:
         try:
-            res = supabase.table('signals').select("*").order('timestamp', desc=True).limit(60).execute()
+            res = supabase.table('signals').select("*").order('timestamp', desc=True).execute()
             df = pd.DataFrame(res.data)
         except: 
             pass 
@@ -142,27 +142,42 @@ def live_dashboard():
     chart_df = df.sort_values('timestamp')
     
     fig = px.area(chart_df, x='timestamp', y='Trend Value', 
-                  title="Real-Time Sentiment Volatility (Above 0 = Opportunity, Below 0 = Risk)",
+                  title="Real-Time Sentiment Volatility",
                   color_discrete_sequence=['#00ff9d'])
     
     fig.update_layout(
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#00ff9d'),
         yaxis=dict(gridcolor='#333', zeroline=True, zerolinecolor='white'), 
-        xaxis=dict(gridcolor='#333', type="date"),
-        margin=dict(l=20, r=20, t=40, b=20), height=350
+        xaxis=dict(
+            gridcolor='#333', 
+            type="date",
+            rangeslider=dict(visible=True),
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=1, label="1h", step="hour", stepmode="backward"),
+                    dict(count=6, label="6h", step="hour", stepmode="backward"),
+                    dict(step="all")
+                ]),
+                bgcolor="#0e1117",
+                activecolor="#00ff9d"
+            )
+        ),
+        margin=dict(l=20, r=20, t=40, b=20), height=400
     )
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
-    df['color'] = df.apply(lambda x: [0, 255, 255, 200] if x['sentiment'] == 'OPPORTUNITY' else 
+    map_df = display_df.head(20)
+
+    map_df['color'] = map_df.apply(lambda x: [0, 255, 255, 200] if x['sentiment'] == 'OPPORTUNITY' else 
                                      ([255, 0, 0, 180] if x['risk_score'] > 75 else 
                                       [255, 165, 0, 180] if x['risk_score'] > 40 else 
                                       [0, 255, 100, 180]), axis=1)
     
     layer = pdk.Layer(
-        "ScatterplotLayer", df,
+        "ScatterplotLayer", map_df,
         get_position='[lon, lat]', get_color="color", get_radius=8000,
         pickable=True, stroked=True, filled=True,
         radius_min_pixels=5, radius_max_pixels=50,
