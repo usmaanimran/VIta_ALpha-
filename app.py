@@ -188,12 +188,13 @@ def live_dashboard():
     top_10_df['Source Link'] = top_10_df['link'].apply(mask_link)
     
     st.dataframe(
-        top_10_df[['timestamp', 'headline', 'sentiment', 'risk_score', 'logistics', 'Source Link']], 
+        top_10_df[['timestamp', 'headline', 'risk_score', 'reason', 'logistics', 'Source Link']], 
         use_container_width=True, 
         hide_index=True,
         column_config={
             "Source Link": st.column_config.LinkColumn("Source", display_text="Open Link"),
-            "risk_score": st.column_config.ProgressColumn("Impact", min_value=0, max_value=100, format="%d")
+            "risk_score": st.column_config.ProgressColumn("Impact", min_value=0, max_value=100, format="%d"),
+            "reason": "AI Analysis"
         }
     )
 
