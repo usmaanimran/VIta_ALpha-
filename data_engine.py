@@ -39,13 +39,13 @@ def init_db():
     if url and key:
         try:
             supabase = create_client(url, key)
-            print("✅ Database Connected")
+            print("Database Connected")
         except: pass
             
     try:
         if vector_model is None:
             vector_model = SentenceTransformer('all-MiniLM-L6-v2')
-            print("🧠 AI Vector Model Loaded")
+            print("AI Vector Model Loaded")
     except: pass
     
     return supabase
@@ -76,7 +76,9 @@ def check_swarm_and_dedupe(new_text):
 
 async def beam_to_cloud(news_items, weather_status):
     db = init_db()
-    if not db: return
+    if not db:
+        print("DB ERROR: Supabase client is None.")
+        return
     
     payload = []
     items_to_cache = [] 
@@ -92,7 +94,7 @@ async def beam_to_cloud(news_items, weather_status):
         
         if is_duplicate and not is_telegram:
             SEEN_LINKS.add(item['link'])
-            print(f"♻️ Skipped Duplicate: {item['title'][:30]}...")
+            print(f"Skipped Duplicate: {item['title'][:30]}...")
             continue
             
         analysis = await logic_engine.calculate_risk(text)
@@ -102,10 +104,10 @@ async def beam_to_cloud(news_items, weather_status):
                 analysis['priority'] = "MEDIUM"
                 analysis['score'] = max(25, analysis['score'])
                 analysis['reason'] = "Manual Override"
-                print(f"🛡️ Telegram Override")
+                print(f"Telegram Override")
             else:
                 SEEN_LINKS.add(item['link'])
-                print(f"🗑️ Trash Filtered: {item['title'][:30]}...")
+                print(f"Trash Filtered: {item['title'][:30]}...")
                 continue
 
         if is_swarm:
@@ -138,10 +140,10 @@ async def beam_to_cloud(news_items, weather_status):
                 RECENT_NEWS_VECTORS.append((txt, vec))
                 if len(RECENT_NEWS_VECTORS) > 100: RECENT_NEWS_VECTORS.pop(0)
                 
-            print(f"🚀 Uploaded {len(payload)} fresh signals from {payload[0]['source']}")
+            print(f"Uploaded {len(payload)} fresh signals from {payload[0]['source']}")
             
     except Exception as e:
-        print(f"❌ Supabase Write Error: {e}")
+        print(f"Supabase Write Error: {e}")
 
 async def fetch_html(session, target):
     headers = {
@@ -151,7 +153,7 @@ async def fetch_html(session, target):
     try:
         async with session.get(target['url'], headers=headers, timeout=10) as response:
             if response.status != 200: 
-                print(f"⚠️ Blocked/Error from {target['name']}: {response.status}")
+                print(f"Blocked/Error from {target['name']}: {response.status}")
                 return []
             
             html_content = await response.text()
@@ -229,7 +231,7 @@ async def fetch_html(session, target):
             return batch
             
     except Exception as e:
-        print(f"⚠️ HTML Parse Error [{target['name']}]: {e}")
+        print(f"HTML Parse Error [{target['name']}]: {e}")
         return []
 
 async def async_listen_loop():
@@ -237,13 +239,13 @@ async def async_listen_loop():
     
     if db and vector_model:
         try:
-            print("⏳ Warming up Swarm Memory...")
+            print("Warming up Swarm Memory...")
             res = db.table('signals').select("headline").order('timestamp', desc=True).limit(50).execute()
             if res.data:
                 texts = [r['headline'] for r in res.data]
                 vecs = vector_model.encode(texts)
                 for t, v in zip(texts, vecs): RECENT_NEWS_VECTORS.append((t, v))
-            print("✅ Swarm Ready")
+            print("Swarm Ready")
         except: pass
 
     targets = [
@@ -253,7 +255,7 @@ async def async_listen_loop():
         {"name": "Newswire", "url": "https://www.newswire.lk/", "type": "html"}
     ]
 
-    print("⚡ VIta Alpha Data Engine Started HTML MODE...")
+    print("VIta Alpha Data Engine Started HTML MODE...")
 
     while True:
         rain_mm, weather_status = ground_truth_engine.fetch_weather_risk()
