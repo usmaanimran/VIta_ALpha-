@@ -124,10 +124,12 @@ def live_dashboard():
     with c2:
         if latest['sentiment'] == "OPPORTUNITY":
             st.metric("OPPORTUNITY SCORE", f"{latest['risk_score']}/100", delta="POSITIVE IMPACT", delta_color="normal")
+        elif latest['sentiment'] == 'RISK' and latest['risk_score'] > 80:
+            st.metric("NATIONAL THREAT LEVEL", f"{latest['risk_score']}/100", delta="ACTIVATE BUSINESS CONTINUITY", delta_color="inverse")
+        elif latest['sentiment'] == 'RISK' and latest['risk_score'] > 50:
+            st.metric("NATIONAL THREAT LEVEL", f"{latest['risk_score']}/100", delta="MONITOR SUPPLY ROUTES", delta_color="inverse")
         else:
-            risk_df = df[df['sentiment'] == 'RISK']
-            avg_threat = int(risk_df['risk_score'].mean()) if not risk_df.empty else 0
-            st.metric("NATIONAL THREAT LEVEL", f"{avg_threat}/100", delta=f"Latest: {latest['risk_score']}", delta_color="inverse")
+            st.metric("NATIONAL THREAT LEVEL", f"{latest['risk_score']}/100", delta="STANDARD OPERATIONS", delta_color="off")
             
     with c3:
         st.metric("INFRASTRUCTURE", latest['logistics'], delta_color="off")
@@ -169,7 +171,10 @@ def live_dashboard():
     st.pydeck_chart(pdk.Deck(
         layers=[layer],
         initial_view_state=pdk.ViewState(latitude=7.87, longitude=80.77, zoom=7.5),
-        tooltip={"html": "<b>{headline}</b><br/>Score: {risk_score}", "style": {"color": "white"}}
+        tooltip={
+            "html": "<b>{headline}</b><br/>⚠️ Score: {risk_score}<br/>ℹ️ Reason: {reason}",
+            "style": {"color": "white", "backgroundColor": "#1E1E1E"}
+        }
     ))
 
     st.subheader("📡 Live Feed")
