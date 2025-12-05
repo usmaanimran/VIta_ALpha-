@@ -28,38 +28,47 @@ async def start_telegram_listener():
     session_string = get_secret("TELEGRAM_SESSION")
     
     if not session_string:
-        print("⚠️ No TELEGRAM_SESSION secret found. Skipping Telegram listener.")
+        print("CRITICAL: No TELEGRAM_SESSION secret found. Skipping Telegram listener.")
         return
 
-    try:
-        print("🔵 Starting Telegram Client...")
-        client = TelegramClient(StringSession(session_string), API_ID, API_HASH)
-        await client.start()
+    print("Telegram Listener Service Starting...")
 
-        @client.on(events.NewMessage())
-        async def handler(event):
-            try:
-                text = event.message.message
-                if not text or text.startswith('/'): return
+    while True:
+        try:
+            if client:
+                await client.disconnect()
+            
+            print("Connecting to Telegram...")
+            client = TelegramClient(StringSession(session_string), API_ID, API_HASH)
+            await client.start()
 
-                chat = await event.get_chat()
-                source_name = getattr(chat, 'title', getattr(chat, 'username', 'Unknown'))
+            @client.on(events.NewMessage())
+            async def handler(event):
+                try:
+                    text = event.message.message
+                    if not text or text.startswith('/'): return
 
-                signal = {
-                    "title": text[:100] + "...",
-                    "full_text": text,
-                    "link": f"https://t.me/{source_name}/{event.id}",
-                    "source": f"Telegram ({source_name})",
-                    "published": datetime.now(timezone.utc).isoformat()
-                }
-                
-                await data_engine.beam_to_cloud([signal], "CLEAR")
+                    print(f"Telegram Signal Received: {text[:30]}...")
 
-            except Exception as e:
-                print(f"Telegram Error: {e}")
-        
-        print("✅ Telegram Listener Active")
-        await client.run_until_disconnected()
-        
-    except Exception as e:
-        print(f"❌ Telegram Startup Failed: {e}")
+                    chat = await event.get_chat()
+                    source_name = getattr(chat, 'title', getattr(chat, 'username', 'Unknown'))
+
+                    signal = {
+                        "title": text[:100] + "...",
+                        "full_text": text,
+                        "link": f"https://t.me/{source_name}/{event.id}",
+                        "source": f"Telegram ({source_name})",
+                        "published": datetime.now(timezone.utc).isoformat()
+                    }
+                    
+                    await data_engine.beam_to_cloud([signal], "CLEAR")
+
+                except Exception as e:
+                    print(f"Telegram Handler Error: {e}")
+            
+            print("Telegram Listener Active")
+            await client.run_until_disconnected()
+            
+        except Exception as e:
+            print(f"Telegram Crash: {e}. Reconnecting in 10s...")
+            await asyncio.sleep(10)
