@@ -91,7 +91,7 @@ async def beam_to_cloud(news_items, weather_status):
             
         is_duplicate, is_swarm, new_vec = check_swarm_and_dedupe(text)
         
-        if is_duplicate and not is_telegram:
+        if is_duplicate:
             SEEN_LINKS.add(item['link'])
             continue
             
@@ -135,26 +135,20 @@ async def beam_to_cloud(news_items, weather_status):
     try:
         if payload:
             db.table('signals').upsert(payload, on_conflict='link').execute()
-            
             for p in payload: SEEN_LINKS.add(p['link'])
-            
             for txt, vec in items_to_cache:
                 RECENT_NEWS_VECTORS.append((txt, vec))
                 if len(RECENT_NEWS_VECTORS) > 100: RECENT_NEWS_VECTORS.pop(0)
-                        
     except Exception: pass
 
 async def fetch_html(session, target):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
     }
     
     try:
         fresh_url = f"{target['url']}?t={int(time.time())}"
-        async with session.get(fresh_url, headers=headers, timeout=10) as response:
+        async with session.get(fresh_url, headers=headers, timeout=15) as response:
             if response.status != 200: 
                 return []
             
@@ -162,75 +156,48 @@ async def fetch_html(session, target):
             soup = BeautifulSoup(html_content, 'html.parser')
             batch = []
             
-            def add_item(link_tag, section_name):
-                if link_tag and link_tag.get_text(strip=True):
-                    title = link_tag.get_text(strip=True)
-                    href = link_tag['href']
-                    
-                    if href.startswith('/'): 
-                        base_url_parts = target['url'].split('/')
-                        base_url = f"{base_url_parts[0]}//{base_url_parts[2]}"
-                        href = base_url + href
-                    
-                    if not any(x['link'] == href for x in batch):
-                        full_title = f"[{section_name}] {title}"
-                        batch.append({
-                            "title": full_title,
-                            "link": href,
-                            "source": target['name'],
-                            "published": datetime.now(timezone.utc).isoformat()
-                        })
+            selectors = [
+                'h3 a', '.cat-title a', '.entry-title a', 
+                '.news-custom-heading a', '.story-text a', 
+                '.news-block a', '.main-news-block a',
+                '.col-md-8 h3 a', 'h2 a'
+            ]
+            
+            seen_in_batch = set()
 
-            if "adaderana" in target['url']:
-                lead = soup.find('div', class_='news-custom-heading') or soup.find('div', class_='lead-story')
-                if lead: add_item(lead.find('a'), "LEAD")
-                
-                if not lead:
-                    top_story = soup.find('div', class_='story-text')
-                    if top_story: add_item(top_story.find('a'), "LEAD")
+            for selector in selectors:
+                for item in soup.select(selector, limit=10):
+                    if item and item.get_text(strip=True):
+                        title = item.get_text(strip=True)
+                        href = item['href']
+                        if href.startswith('/'): 
+                            base_url_parts = target['url'].split('/')
+                            base_url = f"{base_url_parts[0]}//{base_url_parts[2]}"
+                            href = base_url + href
+                        
+                        if href not in seen_in_batch:
+                            seen_in_batch.add(href)
+                            batch.append({
+                                "title": f"[{target['name']}] {title}",
+                                "link": href,
+                                "source": target['name'],
+                                "published": datetime.now(timezone.utc).isoformat()
+                            })
 
-                hot_news = soup.find_all('div', class_='story-text', limit=6)
-                for item in hot_news[1:]:
-                    add_item(item.find('a'), "HOT NEWS")
-
-            elif "dailymirror" in target['url']:
-                top_header = soup.find(string=re.compile("Top Story", re.IGNORECASE))
-                if top_header:
-                    container = top_header.find_parent('div') or top_header.find_parent('section')
-                    if container: add_item(container.find('a'), "TOP STORY")
-                
-                breaking_header = soup.find(string=re.compile("Breaking News", re.IGNORECASE))
-                if breaking_header:
-                    sidebar = breaking_header.find_parent('div') or breaking_header.find_parent('aside')
-                    if sidebar:
-                        for link in sidebar.find_all('a', limit=5):
-                            add_item(link, "BREAKING")
-                
-                if not batch:
-                     for item in soup.select('.col-md-8 h3 a', limit=5):
-                        add_item(item, "LATEST")
-
-            elif "newsfirst" in target['url']:
-                main_block = soup.find('div', class_='main-news-block')
-                if main_block:
-                    for link in main_block.find_all('a', limit=3):
-                        add_item(link, "TOP STORY")
-                
-                latest_block = soup.find('div', class_='latest-news-block') or soup.find('div', class_='sub-1')
-                if latest_block:
-                    for link in latest_block.find_all('a', limit=5):
-                        add_item(link, "LATEST")
-
-            elif "newswire" in target['url']:
-                lead_section = soup.select_one('.td_block_wrap.td_block_big_grid_fl')
-                if lead_section:
-                    add_item(lead_section.find('a'), "LEAD")
-
-                latest_section = soup.select('.td_block_inner .entry-title a')
-                for link in latest_section[:5]:
-                    add_item(link, "LATEST")
-
-            return batch
+            if not batch:
+                for link in soup.find_all('a', href=True):
+                    text = link.get_text(strip=True)
+                    if 25 < len(text) < 150 and "http" in link['href']:
+                        if link['href'] not in seen_in_batch:
+                            seen_in_batch.add(link['href'])
+                            batch.append({
+                                "title": f"[{target['name']}] {text}",
+                                "link": link['href'],
+                                "source": target['name'],
+                                "published": datetime.now(timezone.utc).isoformat()
+                            })
+            
+            return batch[:10]
             
     except Exception:
         return []
@@ -255,7 +222,7 @@ async def async_listen_loop():
     targets = [
         {"name": "Ada Derana", "url": "http://www.adaderana.lk/hot-news/", "type": "html"},
         {"name": "Daily Mirror", "url": "https://www.dailymirror.lk/latest-news/108", "type": "html"},
-        {"name": "News First", "url": "https://english.newsfirst.lk/", "type": "html"},
+        {"name": "News First", "url": "https://english.newsfirst.lk/latest-news", "type": "html"},
         {"name": "Newswire", "url": "https://www.newswire.lk/", "type": "html"}
     ]
 
@@ -276,4 +243,4 @@ async def async_listen_loop():
         if DEMO_MODE:
             await asyncio.sleep(10)
         else:
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
