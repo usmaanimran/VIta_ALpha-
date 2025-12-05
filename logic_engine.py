@@ -26,14 +26,28 @@ class HybridBrain:
 
     async def _neural_scan(self, text):
         if not self.groq_key: 
-            return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0, True
+            return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0, True, "LOW"
 
         try:
             async with AsyncGroq(api_key=self.groq_key) as client:
                 completion = await client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[
-                        {"role": "system", "content": "Analyze for Sri Lankan Business. If text is junk/chatter set validity=false. If text is valid Risk OR Opportunity set validity=true. Return JSON: {validity, score, reason, sentiment_type, logistics_status, location_name, lat, lon}"},
+                        {"role": "system", "content": """
+                        You are a Risk Analyst for Sri Lankan Supply Chains.
+                        Analyze the text and assign a 'score' (0-100) based strictly on OPERATIONAL IMPACT:
+
+                        RUBRIC:
+                        - 90-100 (CRITICAL): National shutdown, Port/Airport closure, Island-wide power failure, Curfew.
+                        - 70-89 (HIGH): Supply chain disruption, Strikes at Ports/Fuel, Floods blocking major highways.
+                        - 40-69 (MEDIUM): Localized unrest, High inflation announcements, Weather alerts.
+                        - 10-39 (LOW): Political gossip, peaceful protests, minor delays.
+                        - 0 (CLEAR): No business impact.
+                        
+                        If text is junk/chatter set validity=false.
+                        Return JSON: {validity, score, reason, sentiment_type, logistics_status, location_name, lat, lon, severity_level}
+                        severity_level should be LOW, MEDIUM, or HIGH.
+                        """},
                         {"role": "user", "content": f"TEXT: {text}"}
                     ],
                     temperature=0, response_format={"type": "json_object"}
@@ -41,7 +55,7 @@ class HybridBrain:
                 r = json.loads(completion.choices[0].message.content)
             
             if r.get('validity') is False:
-                return 0, "AI_REJECT", "", "", "", 0, 0, False
+                return 0, "AI_REJECT", "", "", "", 0, 0, False, "LOW"
 
             return (
                 r.get('score', 0), 
@@ -51,11 +65,11 @@ class HybridBrain:
                 r.get('sentiment_type', r.get('sentiment_type', "RISK")),
                 r.get('lat', 0.0),
                 r.get('lon', 0.0),
-                True
+                True,
+                r.get('severity_level', "LOW")
             )
         except Exception as e:
-            print(f"Neural Error: {e}")
-            return 0.0, "Neural Error", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0, True
+            return 0.0, "Neural Error", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0, True, "LOW"
 
     def _fallback_symbolic_scan(self, text):
         text_lower = text.lower()
@@ -65,7 +79,7 @@ class HybridBrain:
         return min(100, score)
 
     async def analyze(self, text):
-        ai_score, ai_reason, loc_name, logistics, sentiment_type, ai_lat, ai_lon, is_valid = await self._neural_scan(text)
+        ai_score, ai_reason, loc_name, logistics, sentiment_type, ai_lat, ai_lon, is_valid, severity = await self._neural_scan(text)
 
         math_score = self._fallback_symbolic_scan(text)
 
@@ -90,7 +104,13 @@ class HybridBrain:
         
         if infra_impacts:
             ai_reason += f" [IMPACT: {', '.join(infra_impacts)}]"
-            final_score += 10
+            if severity == "HIGH":
+                final_score += 30
+            elif severity == "MEDIUM":
+                final_score += 15
+            else:
+                final_score += 5
+                
             if logistics == "CLEAR": logistics = "POTENTIAL DELAY"
 
         final_score = int(min(100, final_score))
