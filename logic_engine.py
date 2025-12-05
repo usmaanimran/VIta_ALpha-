@@ -23,29 +23,22 @@ class HybridBrain:
             "FINANCE": ["cse", "colombo stock exchange", "cbsl", "central bank", "forex", "rupee"]
         }
         self.groq_key = get_secret("GROQ_API_KEY")
-        self.groq_client = None
-        self.neural_active = False
-
-        if self.groq_key:
-            try:
-                self.groq_client = AsyncGroq(api_key=self.groq_key)
-                self.neural_active = True
-            except: pass
 
     async def _neural_scan(self, text):
-        if not self.neural_active: 
+        if not self.groq_key: 
             return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0, True
 
         try:
-            completion = await self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": "Analyze for Sri Lankan Business. If text is junk/chatter set validity=false. If text is valid Risk OR Opportunity set validity=true. Return JSON: {validity, score, reason, sentiment_type, logistics_status, location_name, lat, lon}"},
-                    {"role": "user", "content": f"TEXT: {text}"}
-                ],
-                temperature=0, response_format={"type": "json_object"}
-            )
-            r = json.loads(completion.choices[0].message.content)
+            async with AsyncGroq(api_key=self.groq_key) as client:
+                completion = await client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": "Analyze for Sri Lankan Business. If text is junk/chatter set validity=false. If text is valid Risk OR Opportunity set validity=true. Return JSON: {validity, score, reason, sentiment_type, logistics_status, location_name, lat, lon}"},
+                        {"role": "user", "content": f"TEXT: {text}"}
+                    ],
+                    temperature=0, response_format={"type": "json_object"}
+                )
+                r = json.loads(completion.choices[0].message.content)
             
             if r.get('validity') is False:
                 return 0, "AI_REJECT", "", "", "", 0, 0, False
@@ -60,7 +53,8 @@ class HybridBrain:
                 r.get('lon', 0.0),
                 True
             )
-        except:
+        except Exception as e:
+            print(f"Neural Error: {e}")
             return 0.0, "Neural Error", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0, True
 
     def _fallback_symbolic_scan(self, text):
