@@ -39,13 +39,11 @@ def init_db():
     if url and key:
         try:
             supabase = create_client(url, key)
-            print("Database Connected")
         except: pass
             
     try:
         if vector_model is None:
             vector_model = SentenceTransformer('all-MiniLM-L6-v2')
-            print("AI Vector Model Loaded")
     except: pass
     
     return supabase
@@ -76,13 +74,14 @@ def check_swarm_and_dedupe(new_text):
 
 async def beam_to_cloud(news_items, weather_status):
     db = init_db()
-    if not db:
-        print("DB ERROR: Supabase client is None.")
-        return
+    if not db: return
     
     payload = []
     items_to_cache = [] 
     
+    tasks = []
+    processing_queue = []
+
     for item in news_items:
         text = item.get('full_text', item['title'])
         is_telegram = "Telegram" in item.get('source', '')
@@ -94,20 +93,23 @@ async def beam_to_cloud(news_items, weather_status):
         
         if is_duplicate and not is_telegram:
             SEEN_LINKS.add(item['link'])
-            print(f"Skipped Duplicate: {item['title'][:30]}...")
             continue
             
-        analysis = await logic_engine.calculate_risk(text)
-        
+        tasks.append(logic_engine.calculate_risk(text))
+        processing_queue.append((item, text, is_telegram, is_swarm, new_vec))
+
+    if not tasks: return
+
+    results = await asyncio.gather(*tasks)
+
+    for (item, text, is_telegram, is_swarm, new_vec), analysis in zip(processing_queue, results):
         if analysis.get('priority') == "TRASH":
             if is_telegram:
                 analysis['priority'] = "MEDIUM"
                 analysis['score'] = max(25, analysis['score'])
                 analysis['reason'] = "Manual Override"
-                print(f"Telegram Override")
             else:
                 SEEN_LINKS.add(item['link'])
-                print(f"Trash Filtered: {item['title'][:30]}...")
                 continue
 
         if is_swarm:
@@ -139,21 +141,21 @@ async def beam_to_cloud(news_items, weather_status):
             for txt, vec in items_to_cache:
                 RECENT_NEWS_VECTORS.append((txt, vec))
                 if len(RECENT_NEWS_VECTORS) > 100: RECENT_NEWS_VECTORS.pop(0)
-                
-            print(f"Uploaded {len(payload)} fresh signals from {payload[0]['source']}")
-            
-    except Exception as e:
-        print(f"Supabase Write Error: {e}")
+                        
+    except Exception: pass
 
 async def fetch_html(session, target):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
     }
     
     try:
-        async with session.get(target['url'], headers=headers, timeout=10) as response:
+        fresh_url = f"{target['url']}?t={int(time.time())}"
+        async with session.get(fresh_url, headers=headers, timeout=10) as response:
             if response.status != 200: 
-                print(f"Blocked/Error from {target['name']}: {response.status}")
                 return []
             
             html_content = await response.text()
@@ -230,22 +232,24 @@ async def fetch_html(session, target):
 
             return batch
             
-    except Exception as e:
-        print(f"HTML Parse Error [{target['name']}]: {e}")
+    except Exception:
         return []
 
 async def async_listen_loop():
     db = init_db()
     
-    if db and vector_model:
+    if db:
         try:
-            print("Warming up Swarm Memory...")
-            res = db.table('signals').select("headline").order('timestamp', desc=True).limit(50).execute()
+            res = db.table('signals').select("link").order('timestamp', desc=True).limit(300).execute()
             if res.data:
-                texts = [r['headline'] for r in res.data]
-                vecs = vector_model.encode(texts)
-                for t, v in zip(texts, vecs): RECENT_NEWS_VECTORS.append((t, v))
-            print("Swarm Ready")
+                for r in res.data: SEEN_LINKS.add(r['link'])
+
+            if vector_model:
+                res = db.table('signals').select("headline").order('timestamp', desc=True).limit(50).execute()
+                if res.data:
+                    texts = [r['headline'] for r in res.data]
+                    vecs = vector_model.encode(texts)
+                    for t, v in zip(texts, vecs): RECENT_NEWS_VECTORS.append((t, v))
         except: pass
 
     targets = [
@@ -254,8 +258,6 @@ async def async_listen_loop():
         {"name": "News First", "url": "https://english.newsfirst.lk/", "type": "html"},
         {"name": "Newswire", "url": "https://www.newswire.lk/", "type": "html"}
     ]
-
-    print("VIta Alpha Data Engine Started HTML MODE...")
 
     while True:
         rain_mm, weather_status = ground_truth_engine.fetch_weather_risk()
