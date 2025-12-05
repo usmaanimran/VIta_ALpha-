@@ -14,3 +14,5 @@ scikit-learn
 numpy
 aiohttp
 telethon
+ntscraper
+instaloader
