@@ -61,10 +61,10 @@ def check_swarm_and_dedupe(new_text):
         cached_vecs = [v[1] for v in RECENT_NEWS_VECTORS]
         similarities = cosine_similarity([new_vec], cached_vecs)[0]
         
-        if np.any(similarities > 0.85):
+        if np.any(similarities > 0.75):
             return True, False, new_vec
 
-        swarm_hits = np.sum((similarities > 0.60) & (similarities <= 0.85))
+        swarm_hits = np.sum((similarities > 0.60) & (similarities <= 0.75))
         is_swarm = swarm_hits >= 1
 
         return False, is_swarm, new_vec
@@ -184,18 +184,7 @@ async def fetch_html(session, target):
                                 "published": datetime.now(timezone.utc).isoformat()
                             })
 
-            if not batch:
-                for link in soup.find_all('a', href=True):
-                    text = link.get_text(strip=True)
-                    if 25 < len(text) < 150 and "http" in link['href']:
-                        if link['href'] not in seen_in_batch:
-                            seen_in_batch.add(link['href'])
-                            batch.append({
-                                "title": f"[{target['name']}] {text}",
-                                "link": link['href'],
-                                "source": target['name'],
-                                "published": datetime.now(timezone.utc).isoformat()
-                            })
+           
             
             return batch[:10]
             
