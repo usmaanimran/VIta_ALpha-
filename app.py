@@ -57,14 +57,15 @@ def start_background_workers():
     telegram_thread = threading.Thread(target=run_async_loop, args=(telegram_engine.start_telegram_listener,), daemon=True)
     telegram_thread.start()
 
-start_background_workers()
-
 def get_secret(key):
     if key in os.environ: return os.environ[key]
     try:
         if hasattr(st, "secrets") and key in st.secrets: return st.secrets[key]
     except: pass
     return None
+
+if os.environ.get("ENABLE_WORKERS", "False").lower() == "true":
+    start_background_workers()
 
 supabase = None
 try:
