@@ -1,6 +1,5 @@
 import asyncio
 import aiohttp
-import feedparser
 from bs4 import BeautifulSoup 
 import re
 from supabase import create_client, Client
@@ -61,13 +60,10 @@ def check_swarm_and_dedupe(new_text):
         cached_vecs = [v[1] for v in RECENT_NEWS_VECTORS]
         similarities = cosine_similarity([new_vec], cached_vecs)[0]
         
-        if np.any(similarities > 0.75):
+        if np.any(similarities > 0.60):
             return True, False, new_vec
 
-        swarm_hits = np.sum((similarities > 0.60) & (similarities <= 0.75))
-        is_swarm = swarm_hits >= 1
-
-        return False, is_swarm, new_vec
+        return False, False, new_vec
         
     except:
         return False, False, None
@@ -82,6 +78,11 @@ async def beam_to_cloud(news_items, weather_status):
     tasks = []
     processing_queue = []
 
+    context_str = ""
+    if RECENT_NEWS_VECTORS:
+        last_3 = [item[0] for item in RECENT_NEWS_VECTORS[-3:]]
+        context_str = " | ".join(last_3)
+
     for item in news_items:
         text = item.get('full_text', item['title'])
         is_telegram = "Telegram" in item.get('source', '')
@@ -95,7 +96,7 @@ async def beam_to_cloud(news_items, weather_status):
             SEEN_LINKS.add(item['link'])
             continue
             
-        tasks.append(logic_engine.calculate_risk(text))
+        tasks.append(logic_engine.calculate_risk(text, context_str))
         processing_queue.append((item, text, is_telegram, is_swarm, new_vec))
 
     if not tasks: return
@@ -103,18 +104,31 @@ async def beam_to_cloud(news_items, weather_status):
     results = await asyncio.gather(*tasks)
 
     for (item, text, is_telegram, is_swarm, new_vec), analysis in zip(processing_queue, results):
+        
+     
         if analysis.get('priority') == "TRASH":
-            if is_telegram:
-                analysis['priority'] = "MEDIUM"
-                analysis['score'] = max(25, analysis['score'])
-                analysis['reason'] = "Manual Override"
-            else:
+            SEEN_LINKS.add(item['link'])
+            continue
+
+       
+        if analysis['score'] < 25:
+            valid_low_score_keywords = [
+                "traffic", "road", "lane", "highway", "expressway", "police", 
+                "check", "queue", "fuel", "gas", "petrol", "diesel", 
+                "strike", "protest", "accident", "crash", "delay", "clear", 
+                "normal", "blocked", "closed", "fallen", "tree", "electricity", "power",
+                "water", "train", "bus", "station", "weather", "rain"
+            ]
+            
+            text_lower = text.lower()
+            is_relevant = any(kw in text_lower for kw in valid_low_score_keywords)
+            
+           
+            if not is_relevant:
                 SEEN_LINKS.add(item['link'])
                 continue
-
-        if is_swarm:
-            analysis['score'] = min(100, analysis['score'] + 15)
-            analysis['reason'] += " [Swarm Verified]"
+        
+      
 
         signal = {
             "timestamp": item['published'],
@@ -184,8 +198,6 @@ async def fetch_html(session, target):
                                 "published": datetime.now(timezone.utc).isoformat()
                             })
 
-           
-            
             return batch[:10]
             
     except Exception:
@@ -210,8 +222,6 @@ async def async_listen_loop():
 
     targets = [
         {"name": "Ada Derana", "url": "http://www.adaderana.lk/hot-news/", "type": "html"},
-        {"name": "Daily Mirror", "url": "https://www.dailymirror.lk/latest-news/108", "type": "html"},
-        {"name": "News First", "url": "https://english.newsfirst.lk/latest-news", "type": "html"},
         {"name": "Newswire", "url": "https://www.newswire.lk/", "type": "html"}
     ]
 
