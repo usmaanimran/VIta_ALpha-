@@ -60,13 +60,15 @@ def check_swarm_and_dedupe(new_text):
         cached_vecs = [v[1] for v in RECENT_NEWS_VECTORS]
         similarities = cosine_similarity([new_vec], cached_vecs)[0]
         
-        if np.any(similarities > 0.60):
+       
+        if np.any(similarities > 0.75):
             return True, False, new_vec
 
         return False, False, new_vec
         
     except:
         return False, False, None
+
 
 async def beam_to_cloud(news_items, weather_status):
     db = init_db()
@@ -105,12 +107,17 @@ async def beam_to_cloud(news_items, weather_status):
 
     for (item, text, is_telegram, is_swarm, new_vec), analysis in zip(processing_queue, results):
         
-     
+       
         if analysis.get('priority') == "TRASH":
             SEEN_LINKS.add(item['link'])
             continue
 
-       
+        
+        if "Neural Offline" in analysis.get('reason', ''):
+            SEEN_LINKS.add(item['link'])
+            continue
+
+      
         if analysis['score'] < 25:
             valid_low_score_keywords = [
                 "traffic", "road", "lane", "highway", "expressway", "police", 
@@ -123,12 +130,9 @@ async def beam_to_cloud(news_items, weather_status):
             text_lower = text.lower()
             is_relevant = any(kw in text_lower for kw in valid_low_score_keywords)
             
-           
             if not is_relevant:
                 SEEN_LINKS.add(item['link'])
                 continue
-        
-      
 
         signal = {
             "timestamp": item['published'],
@@ -155,6 +159,7 @@ async def beam_to_cloud(news_items, weather_status):
                 if len(RECENT_NEWS_VECTORS) > 100: RECENT_NEWS_VECTORS.pop(0)
     except Exception: pass
 
+
 async def fetch_html(session, target):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
@@ -170,11 +175,17 @@ async def fetch_html(session, target):
             soup = BeautifulSoup(html_content, 'html.parser')
             batch = []
             
+            
             selectors = [
-                'h3 a', '.cat-title a', '.entry-title a', 
-                '.news-custom-heading a', '.story-text a', 
-                '.news-block a', '.main-news-block a',
-                '.col-md-8 h3 a', 'h2 a'
+                'h4.posts-listunit-title a',  
+                'h1 a',                       
+                'h3 a',                       
+                '.col-md-8 h3 a', 
+                '.news-custom-heading a', 
+                '.story-text a', 
+                '.news-block a', 
+                '.main-news-block a',
+                'h2 a'                        
             ]
             
             seen_in_batch = set()
@@ -186,8 +197,9 @@ async def fetch_html(session, target):
                         href = item['href']
                         if href.startswith('/'): 
                             base_url_parts = target['url'].split('/')
-                            base_url = f"{base_url_parts[0]}//{base_url_parts[2]}"
-                            href = base_url + href
+                            if len(base_url_parts) >= 3:
+                                base_url = f"{base_url_parts[0]}//{base_url_parts[2]}"
+                                href = base_url + href
                         
                         if href not in seen_in_batch:
                             seen_in_batch.add(href)
@@ -198,7 +210,7 @@ async def fetch_html(session, target):
                                 "published": datetime.now(timezone.utc).isoformat()
                             })
 
-            return batch[:10]
+            return batch[:12]
             
     except Exception:
         return []
