@@ -166,11 +166,13 @@ def live_dashboard():
         ),
         margin=dict(l=20, r=20, t=40, b=20), height=400
     )
+   
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
-    map_df = display_df.head(20)
+  
+    map_df = display_df.head(20).copy()
 
     map_df['color'] = map_df.apply(lambda x: [0, 255, 255, 200] if x['sentiment'] == 'OPPORTUNITY' else 
                                      ([255, 0, 0, 180] if x['risk_score'] > 75 else 
@@ -194,6 +196,7 @@ def live_dashboard():
     ))
 
     st.subheader("📡 Live Feed")
+    
     top_10_df = display_df.head(10).copy()
     
     def mask_link(link):
@@ -203,9 +206,10 @@ def live_dashboard():
 
     top_10_df['Source Link'] = top_10_df['link'].apply(mask_link)
     
+    
     st.dataframe(
         top_10_df[['timestamp', 'headline', 'risk_score', 'reason', 'logistics', 'Source Link']], 
-        use_container_width=True, 
+        width="stretch",
         hide_index=True,
         column_config={
             "Source Link": st.column_config.LinkColumn("Source", display_text="Open Link"),
