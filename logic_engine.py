@@ -5,25 +5,30 @@ import streamlit as st
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from groq import AsyncGroq
 
-def get_secret(key):
-    if key in os.environ: return os.environ[key]
-    try:
-        if hasattr(st, "secrets") and key in st.secrets: return st.secrets[key]
-    except: pass
-    return None
+def load_key_securely():
+    key = None
+    if "GROQ_API_KEY" in os.environ:
+        key = os.environ["GROQ_API_KEY"]
+    if not key:
+        try:
+            if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+                key = st.secrets["GROQ_API_KEY"]
+        except:
+            pass
+    return key
 
 class HybridBrain:
     def __init__(self):
         self.analyzer = SentimentIntensityAnalyzer()
-        self.groq_key = get_secret("GROQ_API_KEY")
+        self.groq_key = load_key_securely()
         
-       
         self.SPORTS_BAN_LIST = [
             "cricket", "wicket", "t20", "odi", "ipl", "lpl", "rugby", "match", 
-            "won by", "lost by", "innings", "runs", "qualifier", "tournament"
+            "won by", "lost by", "innings", "runs", "qualifier", "tournament",
+            "squad", "cup", "athlete", "championship", "final", "semi-final",
+            "selection", "captain"
         ]
 
-        
         self.CRITICAL_INFRASTRUCTURE = {
             "PORT": ["colombo port", "harbour", "terminal", "customs", "container", "ship"],
             "AIRPORT": ["bia", "katunayake", "mattala", "flights", "airline", "airport"],
@@ -34,7 +39,7 @@ class HybridBrain:
 
     async def _neural_scan(self, text, context=""):
         if not self.groq_key:
-            return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0, True
+            return 0.0, "Neural Offline", "COLOMBO", "CLEAR", "RISK", 0.0, 0.0, False
 
         try:
             async with AsyncGroq(api_key=self.groq_key) as client:
@@ -42,31 +47,33 @@ class HybridBrain:
                     model="llama-3.3-70b-versatile",
                     messages=[
                         {"role": "system", "content": """
-                        You are a Strategic Analyst for Sri Lanka.
-                        Analyze the TEXT given the CONTEXT.
+                        You are a Strategic Analyst for Sri Lanka. Filter and Analyze.
 
-                        TASKS:
-                        1. DECIDE SENTIMENT ("RISK" or "OPPORTUNITY"):
-                           - RISK: Danger, Delay, Loss, Strike, Violence, Bad Weather.
-                           - OPPORTUNITY: Investment, IMF Grant, Tourism Spike, Growth.
+                        STEP 1: STRICT VALIDITY CHECK
+                        IS THIS "IMPORTANT DATA"?
+                        [TRUE] (Keep this):
+                        - ECONOMY: Loans, Grants, IMF, Taxes, Fuel Prices, Inflation.
+                        - INFRASTRUCTURE: Ports, Power, Water, Roads, Transport.
+                        - SECURITY: Crime, Protests, Strikes, Accidents, Disasters.
+                        - GOVERNANCE: New Laws, Curfews, Gazette Notifications.
+                        - LOGISTICS: "Traffic clear", "Train delayed", "Road closed".
 
-                        2. VALIDITY: 
-                           - FALSE: Sports, Gossip, Ads, Greetings.
-                           - TRUE: Economy, Security, Logistics, Development, Traffic.
+                        [FALSE] (TRASH this - Return validity=False):
+                        - POLITICAL GOSSIP: Party meetings, insults, speeches without policy, Rallies.
+                        - SPORTS: Cricket, Matches, Wins/Losses.
+                        - TRIVIA: Celebrity news, religious ceremonies, greetings, promotions.
 
-                        3. LOGISTICS STATUS:
-                           - "DISRUPTED" / "POTENTIAL DELAY" / "CLEAR" (For Risk).
-                           - "BOOST" (For Opportunity).
+                        STEP 2: SENTIMENT ("RISK" or "OPPORTUNITY")
+                        - RISK: Danger, Delay, Loss, Strike, Violence, Bad Weather.
+                        - OPPORTUNITY: Investment, Donations (Grants), Foreign Aid, Tourism Spike, Development.
 
-                        4. SCORE (0-100):
-                           - 80-100: Critical Impact (Disaster/Mega Deal).
-                           - 50-79:  High Impact (Protest/Tourism Boom).
-                           - 25-49:  Medium Impact (Traffic/Small Grant).
-                           - 0-24:   Low Impact.
+                        STEP 3: SCORE (0-100)
+                        - 80-100: CRITICAL (Disaster, Deaths, Port Closure, Mega Projects).
+                        - 50-79:  HIGH (Floods, Protests, Highway Blocked, New Investments).
+                        - 25-49:  MEDIUM (Traffic delays, Routine Warnings).
+                        - 0-24:   LOW (Routine but valid updates like "Traffic normal").
 
-                        5. LOCATION: Lat/Lon.
-
-                        Return JSON: {validity, score, reason, sentiment_type, logistics_status, lat, lon}
+                        Return JSON: {validity (bool), score (int), reason (str), sentiment_type, logistics_status, lat, lon}
                         """},
                         {"role": "user", "content": f"CONTEXT: {context}\n\nTEXT: {text}"}
                     ],
@@ -93,13 +100,19 @@ class HybridBrain:
     def _fallback_symbolic_scan(self, text):
         text_lower = text.lower()
         score = 0
+        sentiment = "RISK"
+
         if "dead" in text_lower or "killed" in text_lower: score += 75
         if "injured" in text_lower: score += 40
-        return min(100, score)
+        if "donation" in text_lower or "grant" in text_lower: 
+            score += 50
+            sentiment = "OPPORTUNITY"
+
+        return min(100, score), sentiment
 
     async def analyze(self, text, context=""):
-        
         text_lower = text.lower()
+        
         if any(ban_word in text_lower for ban_word in self.SPORTS_BAN_LIST):
             return {
                 "score": 0,
@@ -111,16 +124,15 @@ class HybridBrain:
         ai_score, ai_reason, _, logistics, sentiment_type, ai_lat, ai_lon, is_valid = await self._neural_scan(text, context)
 
         if not is_valid:
-             math_score = self._fallback_symbolic_scan(text)
+             math_score, math_sentiment = self._fallback_symbolic_scan(text)
              if math_score > 40:
                  is_valid = True
                  ai_score = math_score
                  ai_reason = "Symbolic Rescue"
-                 sentiment_type = "RISK"
+                 sentiment_type = math_sentiment
              else:
                  return {"priority": "TRASH", "reason": "AI Filter"}
 
-        
         if sentiment_type == "RISK":
             infra_impacts = []
             for sector, keywords in self.CRITICAL_INFRASTRUCTURE.items():
@@ -129,7 +141,7 @@ class HybridBrain:
             
             if infra_impacts:
                 ai_reason += f" [IMPACT: {', '.join(infra_impacts)}]"
-                ai_score += 20
+                ai_score += 10
                 if logistics == "CLEAR": logistics = "POTENTIAL DELAY"
 
         final_score = int(min(100, ai_score))
