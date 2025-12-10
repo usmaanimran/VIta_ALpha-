@@ -172,7 +172,7 @@ def live_dashboard():
     st.divider()
 
   
-    map_df = display_df.head(10).copy()
+    map_df = display_df.head(15).copy()
 
     map_df['color'] = map_df.apply(lambda x: [0, 255, 255, 200] if x['sentiment'] == 'OPPORTUNITY' else 
                                      ([255, 0, 0, 180] if x['risk_score'] > 75 else 
@@ -220,4 +220,5 @@ def live_dashboard():
 
 if __name__ == "__main__":
     live_dashboard()
+
 
